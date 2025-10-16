@@ -1,10 +1,12 @@
+use crate::rich_string::RichString;
+
 pub struct Screenplay {
     pub elements: Vec<Element>,
 }
 
 pub enum Element {
     Heading(String),
-    Action(String),
+    Action(RichString),
     Dialogue {
         character: String,
         elements: Vec<DialogueElement>,
@@ -12,6 +14,6 @@ pub enum Element {
 }
 
 pub enum DialogueElement {
-    Paranthetical(String),
-    Line(String),
+    Paranthetical(RichString),
+    Line(RichString),
 }

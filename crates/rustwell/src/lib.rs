@@ -1,3 +1,4 @@
+mod rich_string;
 mod screenplay;
 
 pub fn process(input: &str) -> String {
