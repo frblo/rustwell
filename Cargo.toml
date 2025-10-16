@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/rustwell", "crates/rustwell-cli"]
+resolver = "2"
