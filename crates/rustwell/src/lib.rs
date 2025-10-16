@@ -1,4 +1,6 @@
+mod rich_string;
+mod screenplay;
 
 pub fn process(input: &str) -> String {
-    format!("Ruswtell processed: {input}")
+    format!("Rustwell processed: {input}")
 }
