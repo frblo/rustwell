@@ -30,3 +30,25 @@ bitflags! {
         const ITALIC    = 0b100;
     }
 }
+
+impl From<String> for RichString {
+    fn from(str: String) -> Self {
+        RichString {
+            elements: vec![Element {
+                text: str,
+                attributes: Attributes::empty(),
+            }],
+        }
+    }
+}
+
+impl From<&str> for RichString {
+    fn from(str: &str) -> Self {
+        RichString {
+            elements: vec![Element {
+                text: str.to_string(),
+                attributes: Attributes::empty(),
+            }],
+        }
+    }
+}

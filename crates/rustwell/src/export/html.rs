@@ -1,8 +1,42 @@
+use std::io::Write;
+
 use crate::{
     export::styles::{Style, element_style},
     rich_string::{self, RichString},
-    screenplay::{DialogueElement, Element},
+    screenplay::{DialogueElement, Element, Screenplay},
 };
+
+const CSS: &str = include_str!("style.css");
+
+pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
+    writeln!(
+        &mut writer,
+        r#"<!DOCTYPE html>
+<html>
+    <head>
+        <title>Screenplay</title>
+        {}
+    </head>
+    <body>
+        <div id="wrapper" class="screenplay">"#,
+        if css {
+            format!(r#"<style type="text/css">{}</style>"#, CSS)
+        } else {
+            "".to_string()
+        }
+    )
+    .expect("Failed to write to output");
+    for e in &screenplay.elements {
+        writeln!(&mut writer, "{}", export_element(e)).expect("Failed to write to output");
+    }
+    writeln!(
+        &mut writer,
+        r#"</div>
+    </body>
+</html>"#
+    )
+    .expect("Failed to write to output");
+}
 
 fn export_element(element: &Element) -> String {
     let style = element_style(element);
@@ -79,9 +113,9 @@ fn format_rich_element(element: &rich_string::Element, style: &Style) -> String 
     );
     let append = format!(
         "{}{}{}",
-        if bold { "</u>" } else { "" },
+        if underline { "</u>" } else { "" },
         if italic { "</em>" } else { "" },
-        if underline { "</strong>" } else { "" },
+        if bold { "</strong>" } else { "" },
     );
     format!("{prepend}{}{append}", element.text)
 }
@@ -103,5 +137,30 @@ fn format_dialogue_element(element: &DialogueElement, style: &Style) -> String {
             )
         }
         DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, format_rich_string(s, style)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufWriter, stdout};
+
+    use super::*;
+
+    #[test]
+    fn test_thing() {
+        let play = Screenplay {
+            titlepage: None,
+            elements: vec![
+                Element::Heading {
+                    slug: "INT. Hej".into(),
+                    number: None,
+                },
+                Element::Action("Bosse går till affären".into()),
+            ],
+        };
+
+        let writer = BufWriter::new(stdout());
+        export_html(&play, writer, true);
+        assert!(true)
     }
 }
