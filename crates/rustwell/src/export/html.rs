@@ -1,6 +1,6 @@
 use crate::{
     rich_string::{self, RichString},
-    screenplay::Element,
+    screenplay::{Dialogue, DialogueElement, Element},
 };
 
 fn export_element(element: &Element) -> String {
@@ -25,7 +25,11 @@ fn export_element(element: &Element) -> String {
             r#"<div class="action"><p>{}</p></div>"#,
             format_rich_string(s)
         ),
-        Element::Dialogue(dialogue) => todo!(),
+        Element::Dialogue(dialogue) => format!(
+            r#"<div class="dialog"><p class="character">{}</p>{}</div>"#,
+            format_rich_string(&dialogue.character),
+            format_dialogue(&dialogue.elements),
+        ),
         Element::DualDialogue(dialogue, dialogue1) => todo!(),
         Element::Lyrics(s) => format!(
             // TODO: Class "lyrics" is not yet implemented in css
@@ -70,4 +74,21 @@ fn format_rich_element(element: &rich_string::Element) -> String {
         if element.is_bold() { "</strong>" } else { "" },
     );
     format!("{prepend}{}{append}", element.text)
+}
+
+fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
+    dialogue
+        .iter()
+        .map(format_dialogue_element)
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+fn format_dialogue_element(element: &DialogueElement) -> String {
+    match element {
+        DialogueElement::Paranthetical(s) => {
+            format!(r#"<p class="parenthetical">{}</p>"#, format_rich_string(s))
+        }
+        DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, format_rich_string(s)),
+    }
 }
