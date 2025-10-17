@@ -1,14 +1,32 @@
+use bitflags::bitflags;
+
 pub struct RichString {
-    elements: Vec<Element>,
+    pub elements: Vec<Element>,
 }
 
 pub struct Element {
-    text: String,
-    attributes: Vec<Attribute>,
+    pub text: String,
+    attributes: Attributes,
 }
 
-pub enum Attribute {
-    Bold,
-    Underline,
-    Italic,
+impl Element {
+    pub fn is_bold(&self) -> bool {
+        self.attributes.contains(Attributes::BOLD)
+    }
+
+    pub fn is_underline(&self) -> bool {
+        self.attributes.contains(Attributes::UNDERLINE)
+    }
+
+    pub fn is_italic(&self) -> bool {
+        self.attributes.contains(Attributes::ITALIC)
+    }
+}
+
+bitflags! {
+    pub struct Attributes: u8 {
+        const BOLD      = 0b001;
+        const UNDERLINE = 0b010;
+        const ITALIC    = 0b100;
+    }
 }

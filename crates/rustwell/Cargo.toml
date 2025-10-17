@@ -8,3 +8,4 @@ license = "MIT"
 path = "src/lib.rs"
 
 [dependencies]
+bitflags = "2"
