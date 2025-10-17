@@ -2,4 +2,4 @@
 
 ## Acknowledgements
 
-The CSS code for the html output was originally created by [Jonathan Poritsky](https://www.candlerblog.com/).
+The original CSS code for the html output was created by [Jonathan Poritsky](https://www.candlerblog.com/), but has been expanded upon for this endeavour.

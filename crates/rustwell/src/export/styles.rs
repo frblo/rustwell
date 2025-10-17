@@ -31,11 +31,7 @@ pub fn element_style(element: &Element) -> Style {
         Element::Action(_) => NO_STYLE,
         Element::Dialogue(_) => NO_STYLE,
         Element::DualDialogue(_, _) => NO_STYLE,
-        Element::Lyrics(_) => Style {
-            bold: None,
-            italic: Some(true),
-            underline: None,
-        },
+        Element::Lyrics(_) => NO_STYLE,
         Element::Transition(_) => NO_STYLE,
         Element::CenteredText(_) => NO_STYLE,
         Element::Note(_) => NO_STYLE,

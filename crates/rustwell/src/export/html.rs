@@ -83,7 +83,6 @@ fn export_element(element: &Element) -> String {
             format_dialogue(&dialogue2.elements, &style),
         ),
         Element::Lyrics(s) => format!(
-            // TODO: Class "lyrics" is not yet implemented in css
             r#"<div class="lyrics"><p>{}</p></div>"#,
             format_rich_string(s, &style)
         ),
@@ -171,6 +170,7 @@ mod tests {
                     number: Some("fuck".into()),
                 },
                 Element::Action("Bosse går till affären".into()),
+                Element::Lyrics("Haalåå jag har ramlat i brunnen!".into()),
             ],
         };
 
