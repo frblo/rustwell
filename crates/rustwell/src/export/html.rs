@@ -66,7 +66,22 @@ fn export_element(element: &Element) -> String {
             format_rich_string(&dialogue.character, &style),
             format_dialogue(&dialogue.elements, &style),
         ),
-        Element::DualDialogue(dialogue, dialogue1) => todo!(),
+        Element::DualDialogue(dialogue1, dialogue2) => format!(
+            r#"<div class="dual">
+                <div class="left">
+                    <p class="character">{}</p>
+                    {}
+                </div>
+                <div class="right">
+                    <p class="character">{}</p>
+                    {}
+                </div>
+            </div>"#,
+            format_rich_string(&dialogue1.character, &style),
+            format_dialogue(&dialogue1.elements, &style),
+            format_rich_string(&dialogue2.character, &style),
+            format_dialogue(&dialogue2.elements, &style),
+        ),
         Element::Lyrics(s) => format!(
             // TODO: Class "lyrics" is not yet implemented in css
             r#"<div class="lyrics"><p>{}</p></div>"#,
@@ -153,7 +168,7 @@ mod tests {
             elements: vec![
                 Element::Heading {
                     slug: "INT. Hej".into(),
-                    number: None,
+                    number: Some("fuck".into()),
                 },
                 Element::Action("Bosse går till affären".into()),
             ],
