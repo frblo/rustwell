@@ -26,7 +26,7 @@ pub struct Dialogue {
 }
 
 pub enum DialogueElement {
-    Paranthetical(RichString),
+    Parenthetical(RichString),
     Line(RichString),
 }
 
