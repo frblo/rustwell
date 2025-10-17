@@ -1,5 +1,6 @@
 use crate::rich_string::RichString;
 
+#[derive(Debug)]
 pub struct Screenplay {
     pub titlepage: Option<TitlePage>,
     pub elements: Vec<Element>,
@@ -18,6 +19,7 @@ impl Screenplay {
     }
 }
 
+#[derive(Debug)]
 pub enum Element {
     Heading {
         slug: RichString,
@@ -33,11 +35,22 @@ pub enum Element {
     PageBreak,
 }
 
+#[derive(Debug)]
 pub struct Dialogue {
     pub character: RichString,
     pub elements: Vec<DialogueElement>,
 }
 
+impl Dialogue {
+    pub fn new() -> Self {
+        Self {
+            character: RichString::new(),
+            elements: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum DialogueElement {
     Parenthetical(RichString),
     Line(RichString),

@@ -5,6 +5,21 @@ pub struct RichString {
     pub elements: Vec<Element>,
 }
 
+impl RichString {
+    pub fn new() -> Self {
+        RichString {
+            elements: Vec::new(),
+        }
+    }
+
+    pub fn from(text: &str) -> Self {
+        let mut elements = Vec::new();
+        elements.push(Element::new(text.to_owned()));
+
+        RichString { elements }
+    }
+}
+
 #[derive(Debug)]
 pub struct Element {
     pub text: String,

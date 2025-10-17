@@ -5,4 +5,5 @@ mod screenplay;
 
 pub fn process(input: &str) {
     let sp = parser::parse(input);
+    println!("{:?}", sp);
 }
