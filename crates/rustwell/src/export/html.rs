@@ -1,6 +1,6 @@
 use crate::{
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element},
+    screenplay::{DialogueElement, Element},
 };
 
 fn export_element(element: &Element) -> String {
@@ -86,7 +86,7 @@ fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
 
 fn format_dialogue_element(element: &DialogueElement) -> String {
     match element {
-        DialogueElement::Paranthetical(s) => {
+        DialogueElement::Parenthetical(s) => {
             format!(r#"<p class="parenthetical">{}</p>"#, format_rich_string(s))
         }
         DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, format_rich_string(s)),
