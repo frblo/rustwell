@@ -1,15 +1,24 @@
 use bitflags::bitflags;
 
+#[derive(Debug)]
 pub struct RichString {
     pub elements: Vec<Element>,
 }
 
+#[derive(Debug)]
 pub struct Element {
     pub text: String,
     attributes: Attributes,
 }
 
 impl Element {
+    pub fn new(text: String) -> Self {
+        Self {
+            text,
+            attributes: Attributes::empty(),
+        }
+    }
+
     pub fn is_bold(&self) -> bool {
         self.attributes.contains(Attributes::BOLD)
     }
@@ -24,6 +33,7 @@ impl Element {
 }
 
 bitflags! {
+    #[derive(Debug)]
     pub struct Attributes: u8 {
         const BOLD      = 0b001;
         const UNDERLINE = 0b010;

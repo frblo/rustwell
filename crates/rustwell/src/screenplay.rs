@@ -5,6 +5,19 @@ pub struct Screenplay {
     pub elements: Vec<Element>,
 }
 
+impl Screenplay {
+    pub fn new() -> Self {
+        Self {
+            titlepage: None,
+            elements: Vec::new(),
+        }
+    }
+
+    pub fn set_titlepage(&mut self, titlepage: Option<TitlePage>) {
+        self.titlepage = titlepage;
+    }
+}
+
 pub enum Element {
     Heading {
         slug: RichString,
@@ -30,6 +43,7 @@ pub enum DialogueElement {
     Line(RichString),
 }
 
+#[derive(Debug)]
 pub struct TitlePage {
     pub title: Vec<RichString>,
     pub credit: Vec<RichString>,
@@ -37,4 +51,17 @@ pub struct TitlePage {
     pub source: Vec<RichString>,
     pub draft_date: Vec<RichString>,
     pub contact: Vec<RichString>,
+}
+
+impl TitlePage {
+    pub fn new() -> Self {
+        Self {
+            title: Vec::new(),
+            credit: Vec::new(),
+            authors: Vec::new(),
+            source: Vec::new(),
+            draft_date: Vec::new(),
+            contact: Vec::new(),
+        }
+    }
 }
