@@ -106,7 +106,7 @@ impl<'a> Parser<'a> {
 
         if let Some(forced_action) = line.strip_prefix('!') {
             self.elements
-                .push(Element::Action(RichString::from(&forced_action)));
+                .push(Element::Action(RichString::from(forced_action)));
             return;
         }
 
