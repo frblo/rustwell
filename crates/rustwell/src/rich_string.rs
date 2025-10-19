@@ -33,6 +33,7 @@ where
     T: AsRef<str>,
 {
     fn from(str: T) -> Self {
+        // TODO: Handle escape characters so "\*" is treaded as literal '*'
         let s = str.as_ref();
         let bytes = s.as_bytes();
 
@@ -123,27 +124,5 @@ bitflags! {
         const BOLD      = 0b001;
         const UNDERLINE = 0b010;
         const ITALIC    = 0b100;
-    }
-}
-
-impl From<String> for RichString {
-    fn from(str: String) -> Self {
-        RichString {
-            elements: vec![Element {
-                text: str,
-                attributes: Attributes::empty(),
-            }],
-        }
-    }
-}
-
-impl From<&str> for RichString {
-    fn from(str: &str) -> Self {
-        RichString {
-            elements: vec![Element {
-                text: str.to_string(),
-                attributes: Attributes::empty(),
-            }],
-        }
     }
 }

@@ -9,6 +9,8 @@ use std::str::Lines;
 
 pub fn parse(src: &str) -> Screenplay {
     let cleaned = preprocess_source(src);
+    // TODO: Forced element should get the forcing symbol stripped.
+    // Done sometimes not always
     Parser::new(&cleaned).parse()
 }
 
@@ -214,6 +216,7 @@ impl<'a> Parser<'a> {
             return;
         }
 
+        // TODO: Fix so that it handles empty new lines as empty actions again.
         self.elements.push(Element::Action(RichString::from(line)));
     }
 
