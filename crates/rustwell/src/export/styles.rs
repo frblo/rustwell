@@ -19,22 +19,25 @@ const NO_STYLE: Style = Style {
     underline: None,
 };
 
+/// The [Style] for scene headings. It forces bold.
+const HEADING_STYLE: Style = Style {
+    bold: Some(true),
+    italic: None,
+    underline: None,
+};
+
 /// Gets the [Style] of any given [Element]. If no style is enforced
 /// it will return an full [None]-[Style], forcing nothing.
-pub fn element_style(element: &Element) -> Style {
+pub fn element_style(element: &Element) -> &Style {
     match element {
-        Element::Heading { slug: _, number: _ } => Style {
-            bold: Some(true),
-            italic: None,
-            underline: None,
-        },
-        Element::Action(_) => NO_STYLE,
-        Element::Dialogue(_) => NO_STYLE,
-        Element::DualDialogue(_, _) => NO_STYLE,
-        Element::Lyrics(_) => NO_STYLE,
-        Element::Transition(_) => NO_STYLE,
-        Element::CenteredText(_) => NO_STYLE,
-        Element::Note(_) => NO_STYLE,
-        Element::PageBreak => NO_STYLE,
+        Element::Heading { slug: _, number: _ } => &HEADING_STYLE,
+        Element::Action(_) => &NO_STYLE,
+        Element::Dialogue(_) => &NO_STYLE,
+        Element::DualDialogue(_, _) => &NO_STYLE,
+        Element::Lyrics(_) => &NO_STYLE,
+        Element::Transition(_) => &NO_STYLE,
+        Element::CenteredText(_) => &NO_STYLE,
+        Element::Note(_) => &NO_STYLE,
+        Element::PageBreak => &NO_STYLE,
     }
 }

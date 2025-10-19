@@ -141,6 +141,10 @@ div.transition {
     width: 306.67pt;
     text-transform: uppercase;
 }
+.note p {
+    padding-left: 2em;
+    color:rgb(145, 145, 145);
+}
 span.scnuml {
     display: block;
     float: left;

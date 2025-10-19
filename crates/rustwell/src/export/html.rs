@@ -6,8 +6,12 @@ use crate::{
     screenplay::{DialogueElement, Element, Screenplay},
 };
 
+/// Contents of the `style.css` file with all css rules for the `html` output
 const CSS: &str = include_str!("style.css");
 
+/// Exports the [Screenplay] in `html`-format to the given writer.
+/// The function allows the caller to choose to include the default `css`
+/// styling as part of the outputed file.
 pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
     writeln!(
         &mut writer,
@@ -38,6 +42,7 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
     .expect("Failed to write to output");
 }
 
+/// Formats an [Element] into a `html`-[String].
 fn export_element(element: &Element) -> String {
     let style = element_style(element);
     match element {
@@ -49,7 +54,7 @@ fn export_element(element: &Element) -> String {
                 } else {
                     ""
                 },
-                format_rich_string(slug, &style),
+                format_rich_string(slug, style),
                 if let Some(x) = number {
                     &format!(r#"<span class="scnumr">{}</span>"#, x)
                 } else {
@@ -59,12 +64,12 @@ fn export_element(element: &Element) -> String {
         }
         Element::Action(s) => format!(
             r#"<div class="action"><p>{}</p></div>"#,
-            format_rich_string(s, &style)
+            format_rich_string(s, style)
         ),
         Element::Dialogue(dialogue) => format!(
             r#"<div class="dialog"><p class="character">{}</p>{}</div>"#,
-            format_rich_string(&dialogue.character, &style),
-            format_dialogue(&dialogue.elements, &style),
+            format_rich_string(&dialogue.character, style),
+            format_dialogue(&dialogue.elements, style),
         ),
         Element::DualDialogue(dialogue1, dialogue2) => format!(
             r#"<div class="dual">
@@ -77,34 +82,34 @@ fn export_element(element: &Element) -> String {
                     {}
                 </div>
             </div>"#,
-            format_rich_string(&dialogue1.character, &style),
-            format_dialogue(&dialogue1.elements, &style),
-            format_rich_string(&dialogue2.character, &style),
-            format_dialogue(&dialogue2.elements, &style),
+            format_rich_string(&dialogue1.character, style),
+            format_dialogue(&dialogue1.elements, style),
+            format_rich_string(&dialogue2.character, style),
+            format_dialogue(&dialogue2.elements, style),
         ),
         Element::Lyrics(s) => format!(
             r#"<div class="lyrics"><p>{}</p></div>"#,
-            format_rich_string(s, &style)
+            format_rich_string(s, style)
         ),
         Element::Transition(s) => {
             format!(
                 r#"<div class="transition">{}</div>"#,
-                format_rich_string(s, &style)
+                format_rich_string(s, style)
             )
         }
         Element::CenteredText(s) => format!(
             r#"<div class="action centered"><p>{}</p></div>"#,
-            format_rich_string(s, &style)
+            format_rich_string(s, style)
         ),
         Element::Note(s) => format!(
-            // TODO: Class "note" is not yet implemented in css
             r#"<div class="note"><p>{}</p></div>"#,
-            format_rich_string(s, &style)
+            format_rich_string(s, style)
         ),
         Element::PageBreak => "".to_string(), // No pagebreaks in html
     }
 }
 
+/// Formats a [RichString] into a `html`-[String].
 fn format_rich_string(str: &RichString, style: &Style) -> String {
     str.elements
         .iter()
@@ -113,6 +118,9 @@ fn format_rich_string(str: &RichString, style: &Style) -> String {
         .concat()
 }
 
+/// Formats a [RichString] [rich_string::Element] into a `html`-[String].
+/// Here the [Style] is taken into consideration and will overrule any styling
+/// in the [rich_string::Element], if it's [Some] in the given [Style].
 fn format_rich_element(element: &rich_string::Element, style: &Style) -> String {
     let bold = (style.bold.is_none() && element.is_bold()) || style.bold.unwrap_or(false);
     let italic = (style.italic.is_none() && element.is_italic()) || style.italic.unwrap_or(false);
@@ -134,6 +142,8 @@ fn format_rich_element(element: &rich_string::Element, style: &Style) -> String 
     format!("{prepend}{}{append}", element.text)
 }
 
+/// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
+/// [DialogueElement]s.
 fn format_dialogue(dialogue: &Vec<DialogueElement>, style: &Style) -> String {
     dialogue
         .iter()
@@ -142,6 +152,7 @@ fn format_dialogue(dialogue: &Vec<DialogueElement>, style: &Style) -> String {
         .join("\n")
 }
 
+/// Formats a [DialogueElement] into a `html`-[String].
 fn format_dialogue_element(element: &DialogueElement, style: &Style) -> String {
     match element {
         DialogueElement::Parenthetical(s) => {
@@ -151,31 +162,5 @@ fn format_dialogue_element(element: &DialogueElement, style: &Style) -> String {
             )
         }
         DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, format_rich_string(s, style)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::{BufWriter, stdout};
-
-    use super::*;
-
-    #[test]
-    fn test_thing() {
-        let play = Screenplay {
-            titlepage: None,
-            elements: vec![
-                Element::Heading {
-                    slug: "INT. Hej".into(),
-                    number: Some("fuck".into()),
-                },
-                Element::Action("Bosse går till affären".into()),
-                Element::Lyrics("Haalåå jag har ramlat i brunnen!".into()),
-            ],
-        };
-
-        let writer = BufWriter::new(stdout());
-        export_html(&play, writer, true);
-        assert!(true)
     }
 }
