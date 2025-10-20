@@ -86,6 +86,12 @@ impl RichString {
     }
 }
 
+impl Default for RichString {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> From<T> for RichString
 where
     T: AsRef<str>,

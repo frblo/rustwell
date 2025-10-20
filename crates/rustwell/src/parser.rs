@@ -27,6 +27,7 @@ use std::str::Lines;
 /// let screenplay = parse(input);
 /// assert!(screenplay.elements.len() > 0);
 /// ```
+#[must_use]
 pub fn parse(src: &str) -> Screenplay {
     let cleaned = preprocess_source(src);
     Parser::new(&cleaned).parse()
@@ -34,8 +35,8 @@ pub fn parse(src: &str) -> Screenplay {
 
 /// Internal parser state machine for Fountain.
 ///
-/// Keeps an iterator of the source, a accumilative list of [Element]s, and
-/// a state. Also tracks a [TitlePage] if such exists in the source.
+/// Keeps an iterator of the source, a accumulative list of [`Element`]s, and
+/// a state. Also tracks a [`TitlePage`] if such exists in the source.
 struct Parser<'a> {
     lines: Peekable<Lines<'a>>,
     state: State,
@@ -63,7 +64,7 @@ impl<'a> Parser<'a> {
     /// lines.
     ///
     /// Might seem like trimming is used a lot. The intention is that the
-    /// try functions work without having trimmed. Cost is extremly low when
+    /// try functions work without having trimmed. Cost is extremely low when
     /// calling trim on a already trimmed [&str].
     fn parse(mut self) -> Screenplay {
         self.parse_title();
@@ -77,35 +78,30 @@ impl<'a> Parser<'a> {
 
             match self.state {
                 State::Default => {
-                    let trimmed = line.trim();
-
+                    // The first one returning true will break
                     if self.try_page_break(trimmed)
                         || self.try_forced_action(trimmed)
                         || self.try_centered(trimmed)
                         || self.try_lyrics(trimmed)
                         || self.try_heading(trimmed)
                         || self.try_transition(trimmed)
-                        || self.try_dialouge_start(trimmed)
+                        || self.try_dialogue_start(trimmed)
                         || self.try_action(line)
-                    {
-                        continue;
-                    }
+                    {}
                 }
                 State::InDialogue => {
-                    let curr_dialouge = match self.elements.last_mut() {
-                        Some(Element::Dialogue(d)) => d,
-                        Some(Element::DualDialogue(_, d)) => d,
-                        _ => unreachable!("If we are here previous must be one of these two"),
+                    let (Some(Element::Dialogue(curr_dialogue)) | Some(Element::DualDialogue(_, curr_dialogue))) = self.elements.last_mut() else {
+                        unreachable!("If we are here previous must be one of these two");
                     };
 
                     if trimmed.starts_with('(') {
-                        curr_dialouge
+                        curr_dialogue
                             .elements
                             .push(DialogueElement::Parenthetical(RichString::from(trimmed)));
                         continue;
                     }
 
-                    curr_dialouge
+                    curr_dialogue
                         .elements
                         .push(DialogueElement::Line(RichString::from(trimmed)));
                 }
@@ -113,9 +109,7 @@ impl<'a> Parser<'a> {
                     if self.try_centered(trimmed)
                         || self.try_lyrics(trimmed)
                         || self.try_action(line)
-                    {
-                        continue;
-                    }
+                    {}
                 }
             }
         }
@@ -228,7 +222,7 @@ impl<'a> Parser<'a> {
         let n = pat.len();
         s.as_bytes()
             .get(..n)
-            .map_or(false, |head| head.eq_ignore_ascii_case(pat.as_bytes()))
+            .is_some_and(|head| head.eq_ignore_ascii_case(pat.as_bytes()))
     }
 
     fn try_heading(&mut self, line: &str) -> bool {
@@ -268,7 +262,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn try_dialouge_start(&mut self, line: &str) -> bool {
+    fn try_dialogue_start(&mut self, line: &str) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -278,8 +272,8 @@ impl<'a> Parser<'a> {
                 }
 
                 let head = trimmed.split_once('(').map_or(trimmed, |(h, _)| h);
-                let has_alpha = head.chars().any(|c| c.is_alphabetic());
-                let has_lower = head.chars().any(|c| c.is_lowercase());
+                let has_alpha = head.chars().any(char::is_alphabetic);
+                let has_lower = head.chars().any(char::is_lowercase);
                 (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
             },
             |this, inner| {
@@ -289,13 +283,14 @@ impl<'a> Parser<'a> {
                             let mut new_dialogue = Dialogue::new();
                             new_dialogue.character = RichString::from(inner);
                             this.elements.push(Element::DualDialogue(d, new_dialogue));
+                            return;
                         }
                     }
-                } else {
-                    let mut dialogue = Dialogue::new();
-                    dialogue.character = RichString::from(inner);
-                    this.elements.push(Element::Dialogue(dialogue));
                 }
+
+                let mut dialogue = Dialogue::new();
+                dialogue.character = RichString::from(inner);
+                this.elements.push(Element::Dialogue(dialogue));
 
                 this.state = State::InDialogue;
             },
@@ -313,7 +308,7 @@ impl<'a> Parser<'a> {
                 }
 
                 let transition_ending = line.ends_with("TO:");
-                let has_lower = line.chars().any(|c| c.is_lowercase());
+                let has_lower = line.chars().any(char::is_lowercase);
                 let transition_elem = transition_ending && !has_lower;
 
                 (transition_elem && this.next_line_is_empty()).then_some(line)
@@ -338,10 +333,10 @@ impl<'a> Parser<'a> {
 
             let mut values = Vec::new();
 
-            if !val.trim().is_empty() {
-                values.push(RichString::from(val));
-            } else {
+            if val.trim().is_empty() {
                 values = self.take_indented_block();
+            } else {
+                values.push(RichString::from(val));
             }
 
             match key.trim().to_ascii_uppercase().as_str() {
@@ -384,7 +379,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_line_is_empty(&mut self) -> bool {
-        self.lines.peek().map_or(true, |s| s.trim().is_empty())
+        self.lines.peek().is_none_or(|s| s.trim().is_empty())
     }
 }
 
@@ -398,25 +393,7 @@ fn preprocess_source(src: &str) -> String {
     while i < bytes.len() {
         let b = bytes[i];
 
-        if !in_comment {
-            // Check if at the start of a comment
-            if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
-                in_comment = true;
-                i += 2;
-                continue;
-            }
-
-            // As Fountain specifes a tab = 4 spaces
-            if b == b'\t' {
-                out.extend_from_slice(b"    ");
-                i += 1;
-                continue;
-            }
-
-            // Normal character
-            out.push(b);
-            i += 1;
-        } else {
+        if in_comment {
             // Inside comment: preserve only newlines so that a comment can cover all whitespace
             if b == b'\n' {
                 out.push(b'\n');
@@ -431,6 +408,24 @@ fn preprocess_source(src: &str) -> String {
                 continue;
             }
 
+            i += 1;
+        } else {
+            // Check if at the start of a comment
+            if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
+                in_comment = true;
+                i += 2;
+                continue;
+            }
+
+            // As Fountain specifies a tab = 4 spaces
+            if b == b'\t' {
+                out.extend_from_slice(b"    ");
+                i += 1;
+                continue;
+            }
+
+            // Normal character
+            out.push(b);
             i += 1;
         }
     }

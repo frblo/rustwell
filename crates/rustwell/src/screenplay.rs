@@ -19,6 +19,12 @@ impl Screenplay {
     }
 }
 
+impl Default for Screenplay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub enum Element {
     Heading {
@@ -50,6 +56,12 @@ impl Dialogue {
     }
 }
 
+impl Default for Dialogue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub enum DialogueElement {
     Parenthetical(RichString),
@@ -76,5 +88,11 @@ impl TitlePage {
             draft_date: Vec::new(),
             contact: Vec::new(),
         }
+    }
+}
+
+impl Default for TitlePage {
+    fn default() -> Self {
+        Self::new()
     }
 }
