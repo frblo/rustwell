@@ -268,7 +268,7 @@ impl<'a> Parser<'a> {
         self.try_(
             line,
             |this, line| {
-                if let Some(inner) = line.trim_start().strip_suffix('>') {
+                if let Some(inner) = line.trim_start().strip_prefix('>') {
                     if !line.trim_end().ends_with('<') {
                         return Some(inner);
                     }
