@@ -12,7 +12,62 @@ impl RichString {
         }
     }
 
-    pub fn push_run(&mut self, text: String, attributes: Attributes) {
+    pub fn push_str(&mut self, str: impl AsRef<str>) {
+        // TODO: Handle escape characters so "\*" is treaded as literal '*'
+        let s = str.as_ref();
+        let bytes = s.as_bytes();
+
+        let mut buf = String::new();
+        let mut attrs = Attributes::empty();
+
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'*' => {
+                    if !buf.is_empty() {
+                        self.push_run(std::mem::take(&mut buf), attrs);
+                    }
+
+                    let mut count = 0;
+                    while i < bytes.len() && bytes[i] == b'*' && count < 3 {
+                        count += 1;
+                        i += 1;
+                    }
+                    match count {
+                        1 => attrs ^= Attributes::ITALIC,
+                        2 => attrs ^= Attributes::BOLD,
+                        3 => attrs ^= Attributes::ITALIC | Attributes::BOLD,
+                        _ => unreachable!("Count can't be increased further than 3"),
+                    }
+                }
+                b'_' => {
+                    if !buf.is_empty() {
+                        self.push_run(std::mem::take(&mut buf), attrs);
+                    }
+                    attrs ^= Attributes::UNDERLINE;
+                    i += 1;
+                }
+                b'\n' => {
+                    if !buf.is_empty() {
+                        self.push_run(std::mem::take(&mut buf), attrs);
+                    }
+                    attrs = Attributes::empty();
+                    self.push_run('\n'.to_string(), Attributes::empty());
+                    i += 1;
+                }
+                _ => {
+                    let ch = s[i..].chars().next().expect("Should be a valid charpoint");
+                    buf.push(ch);
+                    i += ch.len_utf8();
+                }
+            }
+        }
+        if !buf.is_empty() {
+            self.push_run(std::mem::take(&mut buf), attrs);
+        }
+    }
+
+    fn push_run(&mut self, text: String, attributes: Attributes) {
         if text.is_empty() {
             return;
         }
@@ -33,60 +88,8 @@ where
     T: AsRef<str>,
 {
     fn from(str: T) -> Self {
-        // TODO: Handle escape characters so "\*" is treaded as literal '*'
-        let s = str.as_ref();
-        let bytes = s.as_bytes();
-
         let mut out = RichString::new();
-        let mut buf = String::new();
-        let mut attrs = Attributes::empty();
-
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'*' => {
-                    if !buf.is_empty() {
-                        out.push_run(std::mem::take(&mut buf), attrs);
-                    }
-
-                    let mut count = 0;
-                    while i < bytes.len() && bytes[i] == b'*' && count < 3 {
-                        count += 1;
-                        i += 1;
-                    }
-                    match count {
-                        1 => attrs ^= Attributes::ITALIC,
-                        2 => attrs ^= Attributes::BOLD,
-                        3 => attrs ^= Attributes::ITALIC | Attributes::BOLD,
-                        _ => unreachable!("Count can't be increased further than 3"),
-                    }
-                }
-                b'_' => {
-                    if !buf.is_empty() {
-                        out.push_run(std::mem::take(&mut buf), attrs);
-                    }
-                    attrs ^= Attributes::UNDERLINE;
-                    i += 1;
-                }
-                b'\n' => {
-                    if !buf.is_empty() {
-                        out.push_run(std::mem::take(&mut buf), attrs);
-                    }
-                    attrs = Attributes::empty();
-                    out.push_run('\n'.to_string(), Attributes::empty());
-                    i += 1;
-                }
-                _ => {
-                    let ch = s[i..].chars().next().expect("Should be a valid charpoint");
-                    buf.push(ch);
-                    i += ch.len_utf8();
-                }
-            }
-        }
-        if !buf.is_empty() {
-            out.push_run(std::mem::take(&mut buf), attrs);
-        }
-
+        out.push_str(str);
         out
     }
 }
