@@ -1,6 +1,9 @@
 use bitflags::bitflags;
 
 #[derive(Debug)]
+/// A [String] that can have different parts styled.
+///
+/// New lines will always appear as their own non syled element.
 pub struct RichString {
     pub elements: Vec<Element>,
 }

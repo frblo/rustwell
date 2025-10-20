@@ -7,11 +7,35 @@ use crate::screenplay::TitlePage;
 use std::iter::Peekable;
 use std::str::Lines;
 
+/// Parses a Fountain source string into a [`Screenplay`] structure.
+///
+/// Preprocesses the source text by removing
+/// comments and normalizing tabs to spaces
+///
+/// # Examples
+///
+/// ```
+/// use rustwell::parse;
+///
+/// let input = r#"
+/// Title: Example Screenplay
+///
+/// INT. ROOM – DAY
+/// A man stands alone.
+/// "#;
+///
+/// let screenplay = parse(input);
+/// assert!(screenplay.elements.len() > 0);
+/// ```
 pub fn parse(src: &str) -> Screenplay {
     let cleaned = preprocess_source(src);
     Parser::new(&cleaned).parse()
 }
 
+/// Internal parser state machine for Fountain.
+///
+/// Keeps an iterator of the source, a accumilative list of [Element]s, and
+/// a state. Also tracks a [TitlePage] if such exists in the source.
 struct Parser<'a> {
     lines: Peekable<Lines<'a>>,
     state: State,
@@ -20,6 +44,9 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    /// Create new parser
+    ///
+    /// Expects `src` to have been preprocessed.
     fn new(src: &'a str) -> Self {
         Self {
             lines: src.lines().peekable(),
@@ -29,6 +56,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Main entry point for parser
+    ///
+    /// Starts by parsing a potential title. Before moving on to the main loop.
+    /// A line with two or more spaces is always treated as intentional empty
+    /// lines.
+    ///
+    /// Might seem like trimming is used a lot. The intention is that the
+    /// try functions work without having trimmed. Cost is extremly low when
+    /// calling trim on a already trimmed [&str].
     fn parse(mut self) -> Screenplay {
         self.parse_title();
         while let Some(line) = self.lines.next() {
@@ -90,6 +126,8 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// `try_` is a helper function taking a predicate and a handle function
+    /// and is used to define different parts of the state machine.
     fn try_<'s, P, H>(&mut self, line: &'s str, predicate: P, handle: H) -> bool
     where
         P: FnOnce(&mut Self, &'s str) -> Option<&'s str>,
@@ -350,6 +388,7 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Removes comments and normalizes tabs to four spaces
 fn preprocess_source(src: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -400,6 +439,7 @@ fn preprocess_source(src: &str) -> String {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+/// The different states the state machine can be in.
 enum State {
     Default,
     InDialogue,
