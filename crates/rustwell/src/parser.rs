@@ -417,7 +417,7 @@ fn preprocess_source(src: &str) -> String {
                 continue;
             }
 
-            // As Fountain specifies a tab = 4 spaces
+            // A Fountain-specified tab: 4 spaces
             if b == b'\t' {
                 out.extend_from_slice(b"    ");
                 i += 1;
