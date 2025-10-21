@@ -50,15 +50,15 @@ fn export_element(element: &Element) -> String {
             format!(
                 r#"<h6>{}{}{}</h6>"#,
                 if let Some(x) = number {
-                    &format!(r#"<span class="scnuml">{}</span>"#, x)
+                    format!(r#"<span class="scnuml">{}</span>"#, x)
                 } else {
-                    ""
+                    "".to_string()
                 },
                 format_rich_string(slug, style),
                 if let Some(x) = number {
-                    &format!(r#"<span class="scnumr">{}</span>"#, x)
+                    format!(r#"<span class="scnumr">{}</span>"#, x)
                 } else {
-                    ""
+                    "".to_string()
                 },
             )
         }
