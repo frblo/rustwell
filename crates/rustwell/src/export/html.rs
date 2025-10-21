@@ -6,7 +6,7 @@ use crate::{
     screenplay::{DialogueElement, Element, Screenplay},
 };
 
-/// Contents of the `style.css` file with all css rules for the `html` output
+/// Contents of the `style.css` file with all css rules for the `html` output.
 const CSS: &str = include_str!("style.css");
 
 /// Exports the [Screenplay] in `html`-format to the given writer.
@@ -122,6 +122,10 @@ fn format_rich_string(str: &RichString, style: &Style) -> String {
 /// Here the [Style] is taken into consideration and will overrule any styling
 /// in the [rich_string::Element], if it's [Some] in the given [Style].
 fn format_rich_element(element: &rich_string::Element, style: &Style) -> String {
+    // Assumes newlines '\n' will only occur sole elements
+    if element.text == "\n" {
+        return "<br />".to_string();
+    }
     let bold = (style.bold.is_none() && element.is_bold()) || style.bold.unwrap_or(false);
     let italic = (style.italic.is_none() && element.is_italic()) || style.italic.unwrap_or(false);
     let underline =
