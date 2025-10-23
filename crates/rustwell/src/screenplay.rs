@@ -44,6 +44,7 @@ pub enum Element {
 #[derive(Debug)]
 pub struct Dialogue {
     pub character: RichString,
+    pub extension: Option<RichString>,
     pub elements: Vec<DialogueElement>,
 }
 
@@ -51,6 +52,7 @@ impl Dialogue {
     pub fn new() -> Self {
         Self {
             character: RichString::new(),
+            extension: None,
             elements: Vec::new(),
         }
     }
