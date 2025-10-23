@@ -16,7 +16,6 @@ impl RichString {
     }
 
     pub fn push_str(&mut self, str: impl AsRef<str>) {
-        // TODO: Handle escape characters so "\*" is treaded as literal '*'
         let s = str.as_ref();
         let bytes = s.as_bytes();
 
@@ -57,6 +56,16 @@ impl RichString {
                     attrs = Attributes::empty();
                     self.push_run('\n'.to_string(), Attributes::empty());
                     i += 1;
+                }
+                b'\\' => {
+                    let back_slash = s[i..].chars().next().expect("Should be a valid charpoint");
+                    i += back_slash.len_utf8();
+                    // Discard the \
+
+                    // Push the next char
+                    let ch = s[i..].chars().next().expect("Should be a valid charpoint");
+                    buf.push(ch);
+                    i += ch.len_utf8();
                 }
                 _ => {
                     let ch = s[i..].chars().next().expect("Should be a valid charpoint");

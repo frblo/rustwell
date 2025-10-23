@@ -90,9 +90,9 @@ impl<'a> Parser<'a> {
                     {}
                 }
                 State::InDialogue => {
-                    let (Some(Element::Dialogue(curr_dialogue)) | Some(Element::DualDialogue(_, curr_dialogue))) = self.elements.last_mut() else {
-                        unreachable!("If we are here previous must be one of these two");
-                    };
+                    let curr_dialogue = self
+                        .get_last_dialogue()
+                        .expect("Must exist since we are in dialogue block");
 
                     if trimmed.starts_with('(') {
                         curr_dialogue
@@ -262,6 +262,16 @@ impl<'a> Parser<'a> {
         )
     }
 
+    fn get_last_dialogue(&mut self) -> Option<&mut Dialogue> {
+        let (Some(Element::Dialogue(curr_dialogue))
+        | Some(Element::DualDialogue(_, curr_dialogue))) = self.elements.last_mut()
+        else {
+            return None;
+        };
+
+        Some(curr_dialogue)
+    }
+
     fn try_dialogue_start(&mut self, line: &str) -> bool {
         self.try_(
             line,
@@ -277,20 +287,32 @@ impl<'a> Parser<'a> {
                 (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
             },
             |this, inner| {
-                if let Some(inner) = inner.strip_suffix('^') {
+                let mut inner = inner;
+                let new_dialogue = Dialogue::new();
+
+                if let Some(stripped) = inner.trim_end().strip_suffix('^') {
                     if let Some(&Element::Dialogue(_)) = this.elements.last() {
                         if let Some(Element::Dialogue(d)) = this.elements.pop() {
-                            let mut new_dialogue = Dialogue::new();
-                            new_dialogue.character = RichString::from(inner);
                             this.elements.push(Element::DualDialogue(d, new_dialogue));
-                            return;
+                            inner = stripped;
                         }
+                    }
+                } else {
+                    this.elements.push(Element::Dialogue(new_dialogue));
+                }
+
+                let curr_dialogue = this
+                    .get_last_dialogue()
+                    .expect("Just pushed to list, must exist");
+
+                if let Some((head, tail)) = inner.split_once('(') {
+                    if let Some((extension, _)) = tail.split_once(')') {
+                        curr_dialogue.extension = Some(RichString::from(extension));
+                        inner = head.trim_end();
                     }
                 }
 
-                let mut dialogue = Dialogue::new();
-                dialogue.character = RichString::from(inner);
-                this.elements.push(Element::Dialogue(dialogue));
+                curr_dialogue.character = RichString::from(inner);
 
                 this.state = State::InDialogue;
             },

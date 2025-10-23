@@ -50,26 +50,26 @@
 
   if titlepage {
     page({
-    align(center, {
+      align(center, {
         upper(title)
 
         if credit != none {
-          block(credit, above: 1in)
-        }
+        block(credit, above: 1in)
+      }
         if authors != none {
-          block(authors, spacing: 0.5in)
-        }
+        block(authors, spacing: 0.5in)
+      }
         if source != none {
-          block(source, spacing: 0.6in)
-        }
+        block(source, spacing: 0.6in)
+      }
         if draft_date != none {
-          block(draft_date, spacing: 0.9in)
-        }
+        block(draft_date, spacing: 0.9in)
+      }
       })
 
       if contact != none {
-        align(bottom, box(align(left, contact)))
-      }
+      align(bottom, box(align(left, contact)))
+    }
       counter(page).update(0)
     }, margin: ( top: 2in, bottom: 1in ))
   }

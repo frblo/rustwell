@@ -75,12 +75,15 @@ fn export_element(element: &Element) -> String {
         Element::Heading { slug, number } => format!("#scene[{}]", format_rich_string(slug)),
         Element::Action(s) => format_rich_string(s),
         Element::Dialogue(dialogue) => format!(
-            "#dialogue[{}][{}]",
+            "#dialogue(paren: {})[{}][{}]",
+            format_character_extension(&dialogue.extension),
             format_rich_string(&dialogue.character),
             format_dialogue(&dialogue.elements),
         ),
         Element::DualDialogue(dialogue1, dialogue2) => format!(
-            "#dual_dialogue[{}][{}][{}][{}]",
+            "#dual_dialogue(paren1: {}, paren2: {})[{}][{}][{}][{}]",
+            format_character_extension(&dialogue1.extension),
+            format_character_extension(&dialogue2.extension),
             format_rich_string(&dialogue1.character),
             format_dialogue(&dialogue1.elements),
             format_rich_string(&dialogue2.character),
@@ -100,6 +103,14 @@ fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
         .map(format_dialogue_element)
         .collect::<Vec<String>>()
         .join(" ")
+}
+
+fn format_character_extension(opt_ext: &Option<RichString>) -> String {
+    if let Some(ext) = opt_ext {
+        format!("[{}]", format_rich_string(ext))
+    } else {
+        "none".to_string()
+    }
 }
 
 /// Formats a [DialogueElement] into a `html`-[String].
