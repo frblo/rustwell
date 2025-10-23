@@ -23,9 +23,10 @@
 #let dialogue_counter = counter("dialogue")
 
 #let screenplay(
+  titlepage: false,
   title: none,
   credit: none,
-  author: none,
+  authors: none,
   source: none,
   draft_date: none,
   contact: none,
@@ -47,33 +48,35 @@
     h
   }
 
-  page({
+  if titlepage {
+    page({
     align(center, {
-      upper(title)
+        upper(title)
 
-      if credit != none {
-        block(credit, above: 1in)
-      }
-      if author != none {
-        block(author, spacing: 0.5in)
-      }
-      if source != none {
-        block(source, spacing: 0.6in)
-      }
-      if draft_date != none {
-        block(draft_date, spacing: 0.9in)
-      }
-    })
+        if credit != none {
+          block(credit, above: 1in)
+        }
+        if authors != none {
+          block(authors, spacing: 0.5in)
+        }
+        if source != none {
+          block(source, spacing: 0.6in)
+        }
+        if draft_date != none {
+          block(draft_date, spacing: 0.9in)
+        }
+      })
 
-    if contact != none {
-      align(bottom, box(align(left, contact)))
-    }
-    counter(page).update(0)
-  }, margin: ( top: 2in, bottom: 1in ))
+      if contact != none {
+        align(bottom, box(align(left, contact)))
+      }
+      counter(page).update(0)
+    }, margin: ( top: 2in, bottom: 1in ))
+  }
 
   set page(
     header: context {
-      if counter(page).get().at(0) > 1 {
+      if counter(page).get().at(0) > 0 {
         align(right, counter(page).display("1."))
       }
     },
@@ -141,7 +144,7 @@
 #let parenthetical(content) = {
   context{
     block(
-      par([(#content)], hanging-indent: measure("(").width),
+      par([#content], hanging-indent: measure("(").width),
       inset: (left: 0.5in, right: 1in), spacing: line_spacing(0)
     )
   }
@@ -160,4 +163,3 @@
 #let transition(name) = {
   align(right, block([#upper(name)], spacing: line_spacing(1), inset: (right: 2em)))
 }
-

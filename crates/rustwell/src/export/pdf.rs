@@ -1,13 +1,4 @@
-// A wrapper for using and implementing the needed typst functions. Much of this code has been
-// inspired by, and in some cases completely stolen from,
-// [https://github.com/tfachmann/typst-as-library](https://github.com/tfachmann/typst-as-library).
-
-use std::{
-    collections::HashMap,
-    io::Write,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, io::Write};
 
 use typst::{
     self, Library,
@@ -51,7 +42,32 @@ fn format_as_typst(screenplay: &Screenplay) -> String {
         .iter()
         .map(export_element)
         .collect::<Vec<String>>();
-    format!("{TEMPLATE}\n{}", formatted_elements.join("\n"))
+    let titlepage = export_titlepage(screenplay);
+    format!("{TEMPLATE}\n{titlepage}\n{}", formatted_elements.join("\n"))
+}
+
+fn export_titlepage(screenplay: &Screenplay) -> String {
+    if let Some(titlepage) = &screenplay.titlepage {
+        let title = format_titlepage_element(&titlepage.title);
+        let credit = format_titlepage_element(&titlepage.credit);
+        let authors = format_titlepage_element(&titlepage.authors);
+        let source = format_titlepage_element(&titlepage.source);
+        let draft_date = format_titlepage_element(&titlepage.draft_date);
+        let contact = format_titlepage_element(&titlepage.contact);
+        format!(
+            r#"#show: screenplay.with(
+  titlepage: true,
+  title: {title},
+  credit: {credit},
+  authors: {authors},
+  source: {source},
+  draft_date: {draft_date},
+  contact: {contact},
+)"#
+        )
+    } else {
+        "#show: screenplay.with(titlepage: false)".to_string()
+    }
 }
 
 fn export_element(element: &Element) -> String {
@@ -124,7 +140,7 @@ fn format_rich_element(element: &rich_string::Element) -> String {
         } else {
             ""
         },
-        element.text
+        element.text.replace("\\", "\\\\").replace("\"", "\\\"")
     );
     if element.is_underline() {
         out = format!("#underline[{}]", out);
@@ -133,90 +149,45 @@ fn format_rich_element(element: &rich_string::Element) -> String {
     out
 }
 
-/// A typst "[World]", but you know it's a bit abstract and hard to fully understand - almost like
-/// the gods (don't think too much about it. I couldn't come up with a funnier name). Either way
-/// the typst [World] is basically the entirety of the project and therefore has to contain
-/// everything typst will use for compiling the documents.
-///
-/// * The `library` field contains the standard typst library meaning all the functions and stuff.
-/// * `book` is the [FontBook], which more or less is an index of all available fonts in the project.
-/// * `root` is the [PathBuf] root of the project, meaning where typst will search for all files
-///   declared in a document. This includes images, documents etc.
-/// * `source` contains the source files for the project, and in this case it's the files that do
-///   not exist in the root. This includes the `main` file which is declared below, and the
-///   styrdokument file which is outside of the `root` scope.
-/// * `fonts` is simply a [Vec<Font>] which also contains all font data, which is indexed by the
-///   [FontBook].
-/// * `files` contains all files that have been found in the project. Don't think too much about
-///   it.
-pub struct WorldPlay<'a> {
+fn format_titlepage_element(element: &Vec<RichString>) -> String {
+    if element.is_empty() {
+        return "none".to_string();
+    }
+    format!(
+        "[{}]",
+        element
+            .iter()
+            .map(format_rich_string)
+            .collect::<Vec<String>>()
+            .join("\\ ")
+    )
+}
+
+struct WorldPlay<'a> {
     library: LazyHash<Library>,
     book: &'a LazyHash<FontBook>,
-    root: PathBuf,
     source: HashMap<FileId, FileEntry>,
     fonts: &'a Vec<Font>,
-    files: Arc<Mutex<HashMap<FileId, FileEntry>>>,
 }
 
 /// `MAIN` contains the "filename" of the main file, which in typst **has** to be `/main.typ`.
 const MAIN: &str = "/main.typ";
-/// The absolute path to where the typst templating files are stored.
-const DOCUMENT_PATH: &str = "./typst/";
 
 impl<'a> WorldPlay<'a> {
-    /// Creates a new [Asgård] typst [World].
     fn new(content: String, book: &'a LazyHash<FontBook>, fonts: &'a Vec<Font>) -> Self {
         let mut sources = HashMap::new();
         let main = create_source(MAIN, content.clone());
         let main_entry = FileEntry::new(content.into(), Some(main.clone()));
         sources.insert(main.id(), main_entry);
 
-        let root = PathBuf::from("");
-
         Self {
             library: LazyHash::new(Library::default()),
             book,
             fonts,
-            root,
             source: sources,
-            files: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-
-    // /// Handles importing files like documents and images from the `root` directory.
-    // fn file_handler(&self, id: FileId) -> FileResult<FileEntry> {
-    //     let mut files = self.files.lock().map_err(|_| FileError::AccessDenied)?;
-    //     if let Some(entry) = files.get(&id) {
-    //         return Ok(entry.clone());
-    //     }
-    //     let path = if id.package().is_some() {
-    //         // Fetching file from package
-    //         unimplemented!("Packages not included")
-    //     } else {
-    //         // Fetching file from disk
-    //         id.vpath().resolve(&self.root)
-    //     }
-    //     .ok_or(FileError::AccessDenied)?;
-    //
-    //     let content = std::fs::read(&path).map_err(|error| FileError::from_io(error, &path))?;
-    //     Ok(files
-    //         .entry(id)
-    //         .or_insert(FileEntry::new(content, None))
-    //         .clone())
-    // }
 }
-
-// /// Kind of the only way to enable [Html] output while it's in the experimental phase.
-// /// TODO:
-// /// Clean up and move from experimental flag when the html export feature from typst is finished.
-// fn asgård_library() -> Library {
-//     let feature = vec![Feature::Html];
-//     let features: Features = Features::from_iter(feature);
-//     let builder = LibraryBuilder::default();
-//     let real_builder = builder.with_features(features);
-//
-//     real_builder.build()
-// }
 
 /// A [File] that will be stored in the HashMap.
 #[derive(Clone, Debug)]
@@ -289,7 +260,7 @@ impl typst::World for WorldPlay<'_> {
         self.fonts.get(index).cloned()
     }
 
-    /// This function returns `None`, Typst\'s `datetime` function will
+    /// This function returns [None], Typst's `datetime` function will
     /// return an error as a result. Good thing it's not used.
     fn today(&self, _: Option<i64>) -> Option<Datetime> {
         None
