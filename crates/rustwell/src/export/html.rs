@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use crate::{
-    export::styles::{element_style, Style},
+    export::styles::{Style, element_style},
     rich_string::{self, RichString},
     screenplay::{Dialogue, DialogueElement, Element, Screenplay},
 };
@@ -111,7 +111,11 @@ fn export_element(element: &Element) -> String {
 
 fn format_character(dialogue: &Dialogue, style: &Style) -> String {
     if let Some(extension) = &dialogue.extension {
-        format!("{} ({})", format_rich_string(&dialogue.character, style), format_rich_string(extension, style))
+        format!(
+            "{} ({})",
+            format_rich_string(&dialogue.character, style),
+            format_rich_string(extension, style)
+        )
     } else {
         format_rich_string(&dialogue.character, style)
     }

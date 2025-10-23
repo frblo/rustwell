@@ -90,7 +90,9 @@ impl<'a> Parser<'a> {
                     {}
                 }
                 State::InDialogue => {
-                    let curr_dialogue = self.get_last_dialogue().expect("Must exist since we are in dialougue block");
+                    let curr_dialogue = self
+                        .get_last_dialogue()
+                        .expect("Must exist since we are in dialougue block");
 
                     if trimmed.starts_with('(') {
                         curr_dialogue
@@ -261,7 +263,9 @@ impl<'a> Parser<'a> {
     }
 
     fn get_last_dialogue(&mut self) -> Option<&mut Dialogue> {
-        let (Some(Element::Dialogue(curr_dialogue)) | Some(Element::DualDialogue(_, curr_dialogue))) = self.elements.last_mut() else {
+        let (Some(Element::Dialogue(curr_dialogue))
+        | Some(Element::DualDialogue(_, curr_dialogue))) = self.elements.last_mut()
+        else {
             return None;
         };
 
@@ -297,7 +301,9 @@ impl<'a> Parser<'a> {
                     this.elements.push(Element::Dialogue(new_dialogue));
                 }
 
-                let curr_dialogue = this.get_last_dialogue().expect("Just pushed to list, must exist");
+                let curr_dialogue = this
+                    .get_last_dialogue()
+                    .expect("Just pushed to list, must exist");
 
                 if let Some((head, tail)) = inner.split_once('(') {
                     if let Some((extension, _)) = tail.split_once(')') {
