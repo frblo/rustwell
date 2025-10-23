@@ -272,6 +272,22 @@ impl<'a> Parser<'a> {
         Some(curr_dialogue)
     }
 
+    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str) -> &'s str {
+        let new_dialogue = Dialogue::new();
+
+        if let Some(stripped) = inner.trim_end().strip_suffix('^') {
+            if let Some(&Element::Dialogue(_)) = self.elements.last() {
+                if let Some(Element::Dialogue(d)) = self.elements.pop() {
+                    self.elements.push(Element::DualDialogue(d, new_dialogue));
+                    return stripped;
+                }
+            }
+        }
+
+        self.elements.push(Element::Dialogue(new_dialogue));
+        inner
+    }
+
     fn try_dialogue_start(&mut self, line: &str) -> bool {
         self.try_(
             line,
@@ -287,19 +303,7 @@ impl<'a> Parser<'a> {
                 (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
             },
             |this, inner| {
-                let mut inner = inner;
-                let new_dialogue = Dialogue::new();
-
-                if let Some(stripped) = inner.trim_end().strip_suffix('^') {
-                    if let Some(&Element::Dialogue(_)) = this.elements.last() {
-                        if let Some(Element::Dialogue(d)) = this.elements.pop() {
-                            this.elements.push(Element::DualDialogue(d, new_dialogue));
-                            inner = stripped;
-                        }
-                    }
-                } else {
-                    this.elements.push(Element::Dialogue(new_dialogue));
-                }
+                let mut inner = this.insert_empty_dialogue(inner);
 
                 let curr_dialogue = this
                     .get_last_dialogue()
