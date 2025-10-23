@@ -15,8 +15,13 @@ use crate::{
     screenplay::{DialogueElement, Element, Screenplay},
 };
 
+/// The contents of the [typst] template `template.typ` found in the
+/// export module.
 const TEMPLATE: &str = include_str!("template.typ");
 
+/// The font bundled together with Rustwell; Courier Prime.
+/// Includes the data of the font styles Regular, Bold, Italic
+/// and BoldItalic, in stated order.
 const FONTS: [&[u8]; 4] = [
     include_bytes!("fonts/CourierPrime-Regular.ttf"),
     include_bytes!("fonts/CourierPrime-Bold.ttf"),
@@ -69,7 +74,13 @@ fn export_titlepage(screenplay: &Screenplay) -> String {
 
 fn export_element(element: &Element) -> String {
     match element {
-        Element::Heading { slug, number } => format!("#scene[{}]", format_rich_string(slug)),
+        Element::Heading { slug, number } => {
+            if let Some(num) = number {
+                format!("#scene(number: {num})[{}]", format_rich_string(slug))
+            } else {
+                format!("#scene[{}]", format_rich_string(slug))
+            }
+        }
         Element::Action(s) => format_rich_string(s),
         Element::Dialogue(dialogue) => format!(
             "#dialogue(paren: {})[{}][{}]",
@@ -110,7 +121,7 @@ fn format_character_extension(opt_ext: &Option<RichString>) -> String {
     }
 }
 
-/// Formats a [DialogueElement] into a `html`-[String].
+/// Formats a [DialogueElement] into a [typst]-[String].
 fn format_dialogue_element(element: &DialogueElement) -> String {
     match element {
         DialogueElement::Parenthetical(s) => {
@@ -130,6 +141,12 @@ fn format_rich_string(str: &RichString) -> String {
 }
 
 /// Formats a [RichString] [rich_string::Element] into a [typst]-[String].
+/// All elements will be explicitly contained in a `#text("{element.text}")`
+/// function from [typst], with styling using `weight: "bold"`, `style: "italic"`
+/// and `#underline[#text(...)]`.
+///
+/// This function also iterates over each string twice to replace all escaping
+/// characters `\` and `"` with `\\` and `\*` respectively.
 fn format_rich_element(element: &rich_string::Element) -> String {
     // Assumes newlines '\n' will only occur sole elements
     if element.text == "\n" {
@@ -224,6 +241,7 @@ impl FileEntry {
             let source = Source::new(id, contents.into());
             self.source.insert(source)
         };
+        // TODO: Investigate optimization here
         Ok(source.clone())
     }
 }
@@ -258,17 +276,21 @@ impl typst::World for WorldPlay<'_> {
     }
 
     /// Try to access the specified file.
+    /// WARNING: This function will only return [FileError] as it is
+    /// is not implemented, nor needed for Rustwell.
     fn file(&self, _: FileId) -> FileResult<Bytes> {
         FileResult::Err(FileError::NotSource)
     }
 
     /// Try to access the font with the given index in the font book.
     fn font(&self, index: usize) -> Option<Font> {
+        // TODO: Do we have to clone?
         self.fonts.get(index).cloned()
     }
 
-    /// This function returns [None], Typst's `datetime` function will
-    /// return an error as a result. Good thing it's not used.
+    /// Gets the current system time.
+    /// WARNING: This function will only return [None] as it is
+    /// is not implemented, nor needed for Rustwell.
     fn today(&self, _: Option<i64>) -> Option<Datetime> {
         None
     }
@@ -286,7 +308,8 @@ fn create_file_id(filename: &str) -> FileId {
 }
 
 /// Creates a [FontBook] which indexes the [Vec<Font>].
-pub fn create_fontbook() -> (LazyHash<FontBook>, Vec<Font>) {
+fn create_fontbook() -> (LazyHash<FontBook>, Vec<Font>) {
+    // TODO: Bloat, we already have all fonts
     let mut fonts = Vec::new();
     let mut fontbook = FontBook::new();
 

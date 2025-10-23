@@ -150,8 +150,13 @@
   }
 }
 
-#let scene(cont) = {
-  heading(block(upper(cont), above: line_spacing(2), below: line_spacing(1)))
+#let scene(cont, number: none) = {
+  grid(
+    columns: (0em, 1fr, 0em),
+    place(dx: -3em, align(right, number)),
+    heading(block(upper(cont), above: line_spacing(2), below: line_spacing(1))),
+    place(dx: 1em, number),
+  )
 }
 
 #let centered(cont) = {
