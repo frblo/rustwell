@@ -4,21 +4,25 @@
 
 use std::{
     collections::HashMap,
+    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex},
-    vec,
 };
 
 use typst::{
-    self, Feature, Features, Library, LibraryBuilder,
+    self, Library,
     diag::{FileError, FileResult},
     foundations::{Bytes, Datetime},
     syntax::{FileId, Source, VirtualPath},
     text::{Font, FontBook, FontInfo},
     utils::LazyHash,
 };
+use typst_pdf::PdfOptions;
 
-use crate::screenplay::Element;
+use crate::{
+    rich_string::{self, RichString},
+    screenplay::{DialogueElement, Element, Screenplay},
+};
 
 const TEMPLATE: &str = include_str!("template.typ");
 
@@ -29,55 +33,104 @@ const FONTS: [&[u8]; 4] = [
     include_bytes!("fonts/CourierPrime-BoldItalic.ttf"),
 ];
 
+pub fn export_pdf(screenplay: &Screenplay, mut writer: impl Write) {
+    let (fontbook, fonts) = create_fontbook();
+    let content = format_as_typst(screenplay);
+    let worldplay = WorldPlay::new(content, &fontbook, &fonts);
+    let typed_doc = typst::compile(&worldplay)
+        .output
+        .expect("Error compiling pdf output");
+
+    let pdf = typst_pdf::pdf(&typed_doc, &PdfOptions::default()).expect("Error generating pdf");
+    writer.write_all(&pdf).expect("Error writing PDF.");
+}
+
+fn format_as_typst(screenplay: &Screenplay) -> String {
+    let formatted_elements = screenplay
+        .elements
+        .iter()
+        .map(export_element)
+        .collect::<Vec<String>>();
+    format!("{TEMPLATE}\n{}", formatted_elements.join("\n"))
+}
+
 fn export_element(element: &Element) -> String {
     match element {
-        Element::Heading { slug, number } => todo!(),
-        Element::Action(s) => todo!(),
-        Element::Dialogue(s) => todo!(),
-        Element::DualDialogue(dialogue, dialogue1) => todo!(),
-        Element::Lyrics(s) => todo!(),
-        Element::Transition(s) => todo!(),
-        Element::CenteredText(s) => todo!(),
-        Element::Note(s) => todo!(),
-        Element::PageBreak => todo!(),
+        Element::Heading { slug, number } => format!("#scene[{}]", format_rich_string(slug)),
+        Element::Action(s) => format_rich_string(s),
+        Element::Dialogue(dialogue) => format!(
+            "#dialogue[{}][{}]",
+            format_rich_string(&dialogue.character),
+            format_dialogue(&dialogue.elements),
+        ),
+        Element::DualDialogue(dialogue1, dialogue2) => format!(
+            "#dual_dialogue[{}][{}][{}][{}]",
+            format_rich_string(&dialogue1.character),
+            format_dialogue(&dialogue1.elements),
+            format_rich_string(&dialogue2.character),
+            format_dialogue(&dialogue2.elements),
+        ),
+        Element::Lyrics(s) => format!("#lyrics[{}]", format_rich_string(s)),
+        Element::Transition(s) => format!("#transition[{}]", format_rich_string(s)),
+        Element::CenteredText(s) => format!("#centered[{}]", format_rich_string(s)),
+        Element::Note(s) => "".to_string(),
+        Element::PageBreak => "#pagebreak()".to_string(),
+    }
+}
+
+fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
+    dialogue
+        .iter()
+        .map(format_dialogue_element)
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
+/// Formats a [DialogueElement] into a `html`-[String].
+fn format_dialogue_element(element: &DialogueElement) -> String {
+    match element {
+        DialogueElement::Parenthetical(s) => {
+            format!("#parenthetical[{}]", format_rich_string(s))
+        }
+        DialogueElement::Line(s) => format_rich_string(s),
     }
 }
 
 /// Formats a [RichString] into a [typst]-[String].
-fn format_rich_string(str: &RichString, style: &Style) -> String {
+fn format_rich_string(str: &RichString) -> String {
     str.elements
         .iter()
-        .map(|e| format_rich_element(e, style))
+        .map(format_rich_element)
         .collect::<Vec<String>>()
         .concat()
 }
 
 /// Formats a [RichString] [rich_string::Element] into a [typst]-[String].
-/// Here the [Style] is taken into consideration and will overrule any styling
-/// in the [rich_string::Element], if it's [Some] in the given [Style].
-fn format_rich_element(element: &rich_string::Element, style: &Style) -> String {
+fn format_rich_element(element: &rich_string::Element) -> String {
     // Assumes newlines '\n' will only occur sole elements
     if element.text == "\n" {
-        return "<br />".to_string();
+        return "\\ ".to_string();
     }
-    let bold = (style.bold.is_none() && element.is_bold()) || style.bold.unwrap_or(false);
-    let italic = (style.italic.is_none() && element.is_italic()) || style.italic.unwrap_or(false);
-    let underline =
-        (style.underline.is_none() && element.is_underline()) || style.underline.unwrap_or(false);
 
-    let prepend = format!(
-        "{}{}{}",
-        if bold { "<strong>" } else { "" },
-        if italic { "<em>" } else { "" },
-        if underline { "<u>" } else { "" },
+    let mut out = format!(
+        "#text({}{}\"{}\")",
+        if element.is_bold() {
+            "weight: \"bold\","
+        } else {
+            ""
+        },
+        if element.is_italic() {
+            "style: \"italic\","
+        } else {
+            ""
+        },
+        element.text
     );
-    let append = format!(
-        "{}{}{}",
-        if underline { "</u>" } else { "" },
-        if italic { "</em>" } else { "" },
-        if bold { "</strong>" } else { "" },
-    );
-    format!("{prepend}{}{append}", element.text)
+    if element.is_underline() {
+        out = format!("#underline[{}]", out);
+    }
+
+    out
 }
 
 /// A typst "[World]", but you know it's a bit abstract and hard to fully understand - almost like
@@ -96,7 +149,7 @@ fn format_rich_element(element: &rich_string::Element, style: &Style) -> String 
 ///   [FontBook].
 /// * `files` contains all files that have been found in the project. Don't think too much about
 ///   it.
-pub struct Asgård<'a> {
+pub struct WorldPlay<'a> {
     library: LazyHash<Library>,
     book: &'a LazyHash<FontBook>,
     root: PathBuf,
@@ -110,51 +163,18 @@ const MAIN: &str = "/main.typ";
 /// The absolute path to where the typst templating files are stored.
 const DOCUMENT_PATH: &str = "./typst/";
 
-impl<'a> Asgård<'a> {
-    /// Creates a typst [World] intended for `pdf` output. This will include document formatting.
-    pub fn pdf(
-        document: &TypstDocument,
-        book: &'a LazyHash<FontBook>,
-        fonts: &'a Vec<Font>,
-    ) -> Self {
-        let content = format!(
-            r#"
-#import "template.typ": *
-#show: project.with(
-    date: datetime.today().display(),
-    title: "{}"
-)
-#include "{}"
-            "#,
-            document.title(),
-            document.filename()
-        );
-
-        Self::new(document, content, book, fonts)
-    }
-
+impl<'a> WorldPlay<'a> {
     /// Creates a new [Asgård] typst [World].
-    fn new(
-        document: &TypstDocument,
-        content: String,
-        book: &'a LazyHash<FontBook>,
-        fonts: &'a Vec<Font>,
-    ) -> Self {
+    fn new(content: String, book: &'a LazyHash<FontBook>, fonts: &'a Vec<Font>) -> Self {
         let mut sources = HashMap::new();
         let main = create_source(MAIN, content.clone());
         let main_entry = FileEntry::new(content.into(), Some(main.clone()));
-        sources.insert(main.id(), main_entry); // add the very short "main" document
+        sources.insert(main.id(), main_entry);
 
-        let styrdok_content = document.contents();
-        let styrdok = create_source(document.filename(), styrdok_content.clone());
-        let styrdok_entry = FileEntry::new(styrdok_content.into(), Some(styrdok.clone()));
-        sources.insert(styrdok.id(), styrdok_entry); // add the styrdokument
+        let root = PathBuf::from("");
 
-        let root = PathBuf::from(DOCUMENT_PATH);
-
-        let lib = asgård_library();
         Self {
-            library: LazyHash::new(lib),
+            library: LazyHash::new(Library::default()),
             book,
             fonts,
             root,
@@ -163,40 +183,40 @@ impl<'a> Asgård<'a> {
         }
     }
 
-    /// Handles importing files like documents and images from the `root` directory.
-    fn file_handler(&self, id: FileId) -> FileResult<FileEntry> {
-        let mut files = self.files.lock().map_err(|_| FileError::AccessDenied)?;
-        if let Some(entry) = files.get(&id) {
-            return Ok(entry.clone());
-        }
-        let path = if id.package().is_some() {
-            // Fetching file from package
-            unimplemented!("Packages not included")
-        } else {
-            // Fetching file from disk
-            id.vpath().resolve(&self.root)
-        }
-        .ok_or(FileError::AccessDenied)?;
-
-        let content = std::fs::read(&path).map_err(|error| FileError::from_io(error, &path))?;
-        Ok(files
-            .entry(id)
-            .or_insert(FileEntry::new(content, None))
-            .clone())
-    }
+    // /// Handles importing files like documents and images from the `root` directory.
+    // fn file_handler(&self, id: FileId) -> FileResult<FileEntry> {
+    //     let mut files = self.files.lock().map_err(|_| FileError::AccessDenied)?;
+    //     if let Some(entry) = files.get(&id) {
+    //         return Ok(entry.clone());
+    //     }
+    //     let path = if id.package().is_some() {
+    //         // Fetching file from package
+    //         unimplemented!("Packages not included")
+    //     } else {
+    //         // Fetching file from disk
+    //         id.vpath().resolve(&self.root)
+    //     }
+    //     .ok_or(FileError::AccessDenied)?;
+    //
+    //     let content = std::fs::read(&path).map_err(|error| FileError::from_io(error, &path))?;
+    //     Ok(files
+    //         .entry(id)
+    //         .or_insert(FileEntry::new(content, None))
+    //         .clone())
+    // }
 }
 
-/// Kind of the only way to enable [Html] output while it's in the experimental phase.
-/// TODO:
-/// Clean up and move from experimental flag when the html export feature from typst is finished.
-fn asgård_library() -> Library {
-    let feature = vec![Feature::Html];
-    let features: Features = Features::from_iter(feature);
-    let builder = LibraryBuilder::default();
-    let real_builder = builder.with_features(features);
-
-    real_builder.build()
-}
+// /// Kind of the only way to enable [Html] output while it's in the experimental phase.
+// /// TODO:
+// /// Clean up and move from experimental flag when the html export feature from typst is finished.
+// fn asgård_library() -> Library {
+//     let feature = vec![Feature::Html];
+//     let features: Features = Features::from_iter(feature);
+//     let builder = LibraryBuilder::default();
+//     let real_builder = builder.with_features(features);
+//
+//     real_builder.build()
+// }
 
 /// A [File] that will be stored in the HashMap.
 #[derive(Clone, Debug)]
@@ -230,7 +250,7 @@ impl FileEntry {
     }
 }
 
-impl typst::World for Asgård<'_> {
+impl typst::World for WorldPlay<'_> {
     /// The standard library.
     ///
     /// Can be created through `Library::build()`.
@@ -255,13 +275,13 @@ impl typst::World for Asgård<'_> {
                 let mut d = d.clone();
                 d.source(id)
             }
-            None => self.file_handler(id)?.source(id),
+            None => FileResult::Err(FileError::NotSource),
         }
     }
 
     /// Try to access the specified file.
-    fn file(&self, id: FileId) -> FileResult<Bytes> {
-        self.file_handler(id).map(|file| file.bytes.clone())
+    fn file(&self, _: FileId) -> FileResult<Bytes> {
+        FileResult::Err(FileError::NotSource)
     }
 
     /// Try to access the font with the given index in the font book.
