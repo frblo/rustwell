@@ -92,7 +92,7 @@ impl<'a> Parser<'a> {
                 State::InDialogue => {
                     let curr_dialogue = self
                         .get_last_dialogue()
-                        .expect("Must exist since we are in dialougue block");
+                        .expect("Must exist since we are in dialogue block");
 
                     if trimmed.starts_with('(') {
                         curr_dialogue
