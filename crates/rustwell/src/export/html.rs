@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{
     export::styles::{Style, element_style},
     rich_string::{self, RichString},
-    screenplay::{DialogueElement, Element, Screenplay},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -68,7 +68,7 @@ fn export_element(element: &Element) -> String {
         ),
         Element::Dialogue(dialogue) => format!(
             r#"<div class="dialog"><p class="character">{}</p>{}</div>"#,
-            format_rich_string(&dialogue.character, style),
+            format_character(&dialogue, style),
             format_dialogue(&dialogue.elements, style),
         ),
         Element::DualDialogue(dialogue1, dialogue2) => format!(
@@ -82,9 +82,9 @@ fn export_element(element: &Element) -> String {
                     {}
                 </div>
             </div>"#,
-            format_rich_string(&dialogue1.character, style),
+            format_character(&dialogue1, style),
             format_dialogue(&dialogue1.elements, style),
-            format_rich_string(&dialogue2.character, style),
+            format_character(&dialogue2, style),
             format_dialogue(&dialogue2.elements, style),
         ),
         Element::Lyrics(s) => format!(
@@ -106,6 +106,18 @@ fn export_element(element: &Element) -> String {
             format_rich_string(s, style)
         ),
         Element::PageBreak => "".to_string(), // No pagebreaks in html
+    }
+}
+
+fn format_character(dialogue: &Dialogue, style: &Style) -> String {
+    if let Some(extension) = &dialogue.extension {
+        format!(
+            "{} ({})",
+            format_rich_string(&dialogue.character, style),
+            format_rich_string(extension, style)
+        )
+    } else {
+        format_rich_string(&dialogue.character, style)
     }
 }
 
