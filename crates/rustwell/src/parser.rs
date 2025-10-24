@@ -252,9 +252,20 @@ impl<'a> Parser<'a> {
                 .then_some(trimmed)
             },
             |this, inner| {
+                let mut number = None;
+                let mut inner = inner;
+                if let Some(start) = inner.trim_end().strip_suffix('#') {
+                    if let Some((new_inner, numbering)) = start.rsplit_once('#') {
+                        if numbering.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.') {
+                            number = Some(numbering.to_string());
+                            inner = new_inner;
+                        }
+                    }
+                }
+
                 this.elements.push(Element::Heading {
                     slug: RichString::from(inner),
-                    number: None,
+                    number,
                 });
 
                 this.lines.next();
