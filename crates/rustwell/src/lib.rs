@@ -10,6 +10,7 @@ pub use parser::parse;
 pub fn process(input: &str) {
     let sp = parser::parse(input);
     // let mut bw = BufWriter::new(std::io::stdout());
+    // export::typst::export_typst(&sp, &mut bw);
     // export::export_html(&sp, &mut bw, true);
     let file = File::create("s.pdf").unwrap();
     let mut fw = BufWriter::new(file);

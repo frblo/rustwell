@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 use typst::{
     self, Library,
@@ -19,15 +19,10 @@ use crate::{
 /// export module.
 const TEMPLATE: &str = include_str!("template.typ");
 
-/// The font bundled together with Rustwell; Courier Prime.
-/// Includes the data of the font styles Regular, Bold, Italic
-/// and BoldItalic, in stated order.
-const FONTS: [&[u8]; 4] = [
-    include_bytes!("fonts/CourierPrime-Regular.ttf"),
-    include_bytes!("fonts/CourierPrime-Bold.ttf"),
-    include_bytes!("fonts/CourierPrime-Italic.ttf"),
-    include_bytes!("fonts/CourierPrime-BoldItalic.ttf"),
-];
+pub fn export_typst(screenplay: &Screenplay, mut writer: impl Write) {
+    let content = format_as_typst(screenplay);
+    write!(writer, "{content}").expect("Failed to write to typst document");
+}
 
 pub fn compile_document(screenplay: &Screenplay) -> PagedDocument {
     let (fontbook, fonts) = create_fontbook();
@@ -191,19 +186,29 @@ fn format_titlepage_element(element: &Vec<RichString>) -> String {
 struct WorldPlay<'a> {
     library: LazyHash<Library>,
     book: &'a LazyHash<FontBook>,
-    source: HashMap<FileId, FileEntry>,
+    source: HashMap<FileId, Source>,
     fonts: &'a Vec<Font>,
 }
 
 /// `MAIN` contains the "filename" of the main file, which in typst **has** to be `/main.typ`.
 const MAIN: &str = "/main.typ";
 
+/// The font bundled together with Rustwell; Courier Prime.
+/// Includes the data of the font styles Regular, Bold, Italic
+/// and BoldItalic, in stated order.
+const FONTS: [&[u8]; 4] = [
+    include_bytes!("fonts/CourierPrime-Regular.ttf"),
+    include_bytes!("fonts/CourierPrime-Bold.ttf"),
+    include_bytes!("fonts/CourierPrime-Italic.ttf"),
+    include_bytes!("fonts/CourierPrime-BoldItalic.ttf"),
+];
+
 impl<'a> WorldPlay<'a> {
     fn new(content: String, book: &'a LazyHash<FontBook>, fonts: &'a Vec<Font>) -> Self {
         let mut sources = HashMap::new();
-        let main = create_source(MAIN, content.clone());
-        let main_entry = FileEntry::new(content.into(), Some(main.clone()));
-        sources.insert(main.id(), main_entry);
+        let main = create_source(MAIN, content);
+        let main_id = main.id();
+        sources.insert(main_id, main);
 
         Self {
             library: LazyHash::new(Library::default()),
@@ -211,38 +216,6 @@ impl<'a> WorldPlay<'a> {
             fonts,
             source: sources,
         }
-    }
-}
-
-/// A [File] that will be stored in the HashMap.
-#[derive(Clone, Debug)]
-struct FileEntry {
-    bytes: Bytes,
-    source: Option<Source>,
-}
-
-impl FileEntry {
-    fn new(bytes: Vec<u8>, source: Option<Source>) -> Self {
-        Self {
-            bytes: Bytes::new(bytes),
-            source,
-        }
-    }
-
-    /// Gets the required file from a [FileId], preferably already from the [Source], but if it
-    /// has not already been added to the file pool of the [World] it will try to get it and then
-    /// add it to the file pool.
-    fn source(&mut self, id: FileId) -> FileResult<Source> {
-        let source = if let Some(source) = &self.source {
-            source
-        } else {
-            let contents = std::str::from_utf8(&self.bytes).map_err(|_| FileError::InvalidUtf8)?;
-            let contents = contents.trim_start_matches('\u{feff}');
-            let source = Source::new(id, contents.into());
-            self.source.insert(source)
-        };
-        // TODO: Investigate optimization here
-        Ok(source.clone())
     }
 }
 
@@ -267,10 +240,7 @@ impl typst::World for WorldPlay<'_> {
     /// Try to access the specified source file.
     fn source(&self, id: FileId) -> FileResult<Source> {
         match self.source.get(&id) {
-            Some(d) => {
-                let mut d = d.clone();
-                d.source(id)
-            }
+            Some(s) => Ok(s.clone()),
             None => FileResult::Err(FileError::NotSource),
         }
     }
@@ -284,7 +254,6 @@ impl typst::World for WorldPlay<'_> {
 
     /// Try to access the font with the given index in the font book.
     fn font(&self, index: usize) -> Option<Font> {
-        // TODO: Do we have to clone?
         self.fonts.get(index).cloned()
     }
 
@@ -309,7 +278,6 @@ fn create_file_id(filename: &str) -> FileId {
 
 /// Creates a [FontBook] which indexes the [Vec<Font>].
 fn create_fontbook() -> (LazyHash<FontBook>, Vec<Font>) {
-    // TODO: Bloat, we already have all fonts
     let mut fonts = Vec::new();
     let mut fontbook = FontBook::new();
 
