@@ -7,21 +7,15 @@ pub struct Screenplay {
 }
 
 impl Screenplay {
-    pub fn new() -> Self {
+    pub fn new(titlepage: Option<TitlePage>, elements: Vec<Element>) -> Self {
         Self {
-            titlepage: None,
-            elements: Vec::new(),
+            titlepage,
+            elements,
         }
     }
 
     pub fn set_titlepage(&mut self, titlepage: Option<TitlePage>) {
         self.titlepage = titlepage;
-    }
-}
-
-impl Default for Screenplay {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
