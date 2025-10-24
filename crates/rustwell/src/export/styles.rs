@@ -13,7 +13,7 @@ pub struct Style {
 }
 
 /// A [Style] with only [None], meaning it won't force any styling.
-const NO_STYLE: Style = Style {
+pub const NO_STYLE: Style = Style {
     bold: None,
     italic: None,
     underline: None,

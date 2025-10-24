@@ -1,9 +1,9 @@
 use std::io::Write;
 
 use crate::{
-    export::styles::{Style, element_style},
+    export::styles::{NO_STYLE, Style, element_style},
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element, Screenplay},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay, TitlePage},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -30,6 +30,10 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
         }
     )
     .expect("Failed to write to output");
+    if let Some(titlepage) = &screenplay.titlepage {
+        writeln!(&mut writer, "{}", export_titlepage(titlepage))
+            .expect("Failed to write to output");
+    }
     for e in &screenplay.elements {
         writeln!(&mut writer, "{}", export_element(e)).expect("Failed to write to output");
     }
@@ -40,6 +44,41 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
 </html>"#
     )
     .expect("Failed to write to output");
+}
+
+fn export_titlepage(titlepage: &TitlePage) -> String {
+    format!(
+        r#"
+        <div id="title-page">
+            {}
+            {}
+            {}
+            {}
+            {}
+            {}
+        </div>
+    "#,
+        export_titlepage_element("title", &titlepage.title),
+        export_titlepage_element("credit", &titlepage.credit),
+        export_titlepage_element("authors", &titlepage.authors),
+        export_titlepage_element("source", &titlepage.source),
+        export_titlepage_element("draft-date", &titlepage.draft_date),
+        export_titlepage_element("contact", &titlepage.title),
+    )
+}
+
+fn export_titlepage_element(value: &str, element: &Vec<RichString>) -> String {
+    if element.is_empty() {
+        return "".to_string();
+    }
+
+    let content = element
+        .iter()
+        .map(|s| format!("<p>{}</p>", format_rich_string(s, &NO_STYLE)))
+        .collect::<Vec<String>>()
+        .concat();
+
+    format!(r#"<div class="{}">{}</div>"#, value, content)
 }
 
 /// Formats an [Element] into a `html`-[String].
