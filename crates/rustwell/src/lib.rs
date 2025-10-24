@@ -9,8 +9,16 @@ pub use screenplay::Screenplay;
 
 pub use export::export_html;
 
-pub fn parse(mut r: impl Read) -> Screenplay {
+pub fn parse_str(src: &str) -> Screenplay {
+    parser::parse(src)
+}
+
+pub fn parse_reader(mut r: impl Read) -> Screenplay {
     let mut src = String::new();
     r.read_to_string(&mut src).expect("Failed to read data");
     parser::parse(&src)
+}
+
+pub fn parse(src: impl AsRef<str>) -> Screenplay {
+    parser::parse(src.as_ref())
 }
