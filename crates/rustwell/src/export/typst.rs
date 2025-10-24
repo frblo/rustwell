@@ -19,20 +19,28 @@ use crate::{
 /// export module.
 const TEMPLATE: &str = include_str!("template.typ");
 
+/// Exports the provided [Screenplay] as a pure [typst] document that can be
+/// manually compiled with any [typst]-compiler. The document will not be very
+/// readable nor be provided with comments explaining anything. This is mainly included
+/// for debugging.
 pub fn export_typst(screenplay: &Screenplay, mut writer: impl Write) {
     let content = format_as_typst(screenplay);
     write!(writer, "{content}").expect("Failed to write to typst document");
 }
 
+/// Generates a [PagedDocument], which is a layouted [typst] document which can then
+/// be exported and written with any [typst] exporter, like [typst_pdf].
 pub fn compile_document(screenplay: &Screenplay) -> PagedDocument {
     let (fontbook, fonts) = create_fontbook();
     let content = format_as_typst(screenplay);
     let worldplay = WorldPlay::new(content, &fontbook, &fonts);
     typst::compile(&worldplay)
         .output
-        .expect("Error compiling pdf output")
+        .expect("Error compiling typst document")
 }
 
+/// Formats the [Screenplay] as a [typst] document, meaning it essentially gets
+/// converted into [typst]-compilable code.
 fn format_as_typst(screenplay: &Screenplay) -> String {
     let formatted_elements = screenplay
         .elements
@@ -43,6 +51,9 @@ fn format_as_typst(screenplay: &Screenplay) -> String {
     format!("{TEMPLATE}\n{titlepage}\n{}", formatted_elements.join("\n"))
 }
 
+/// Exports the [crate::screenplay::TitlePage] in the provided [Screenplay] to [typst] code.
+/// This function also provides the necessary `#show: screenplay.with(...)` that
+/// handles the page layout for the whole screenplay.
 fn export_titlepage(screenplay: &Screenplay) -> String {
     if let Some(titlepage) = &screenplay.titlepage {
         let title = format_titlepage_element(&titlepage.title);
@@ -67,6 +78,8 @@ fn export_titlepage(screenplay: &Screenplay) -> String {
     }
 }
 
+/// Exports a single [Element] as [typst] code. Primarily done by calling the associated
+/// [typst] function found in the template.
 fn export_element(element: &Element) -> String {
     match element {
         Element::Heading { slug, number } => {
@@ -95,11 +108,12 @@ fn export_element(element: &Element) -> String {
         Element::Lyrics(s) => format!("#lyrics[{}]", format_rich_string(s)),
         Element::Transition(s) => format!("#transition[{}]", format_rich_string(s)),
         Element::CenteredText(s) => format!("#centered[{}]", format_rich_string(s)),
-        Element::Note(s) => "".to_string(),
+        Element::Note(s) => "".to_string(), // TODO: Implement when decided on what do to
         Element::PageBreak => "#pagebreak()".to_string(),
     }
 }
 
+/// Formats the dialogue into [typst] code.
 fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
     dialogue
         .iter()
@@ -108,6 +122,8 @@ fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
         .join(" ")
 }
 
+/// Formats the character extension (`(V.O)`, for example) that is
+/// next to a character's name in a dialogue.
 fn format_character_extension(opt_ext: &Option<RichString>) -> String {
     if let Some(ext) = opt_ext {
         format!("[{}]", format_rich_string(ext))
@@ -116,7 +132,7 @@ fn format_character_extension(opt_ext: &Option<RichString>) -> String {
     }
 }
 
-/// Formats a [DialogueElement] into a [typst]-[String].
+/// Formats a [DialogueElement] into a [typst] code.
 fn format_dialogue_element(element: &DialogueElement) -> String {
     match element {
         DialogueElement::Parenthetical(s) => {
@@ -169,6 +185,8 @@ fn format_rich_element(element: &rich_string::Element) -> String {
     out
 }
 
+/// Formats a single [crate::screenplay::TitlePage] element into [typst] code.
+/// If no value has been declared it will return `"none"`.
 fn format_titlepage_element(element: &Vec<RichString>) -> String {
     if element.is_empty() {
         return "none".to_string();
@@ -183,6 +201,9 @@ fn format_titlepage_element(element: &Vec<RichString>) -> String {
     )
 }
 
+/// Internal [typst::World] which is basically the whole underlying structure of the [typst]
+/// document. This is significantly more slimmed down than a real [typst::World] is, as
+/// everything not needed for Rustwell has been stripped away.
 struct WorldPlay<'a> {
     library: LazyHash<Library>,
     book: &'a LazyHash<FontBook>,
@@ -190,7 +211,7 @@ struct WorldPlay<'a> {
     fonts: &'a Vec<Font>,
 }
 
-/// `MAIN` contains the "filename" of the main file, which in typst **has** to be `/main.typ`.
+/// `MAIN` contains the "filename" of the main file, which in [typst] **has** to be `/main.typ`.
 const MAIN: &str = "/main.typ";
 
 /// The font bundled together with Rustwell; Courier Prime.
@@ -276,7 +297,7 @@ fn create_file_id(filename: &str) -> FileId {
     FileId::new(None, VirtualPath::new(filename))
 }
 
-/// Creates a [FontBook] which indexes the [Vec<Font>].
+/// Creates a [FontBook] which indexes the returned [Vec<Font>].
 fn create_fontbook() -> (LazyHash<FontBook>, Vec<Font>) {
     let mut fonts = Vec::new();
     let mut fontbook = FontBook::new();
