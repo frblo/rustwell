@@ -46,6 +46,7 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
     .expect("Failed to write to output");
 }
 
+/// Exports the [TitlePage] to a `html` string.
 fn export_titlepage(titlepage: &TitlePage) -> String {
     format!(
         r#"
@@ -67,6 +68,9 @@ fn export_titlepage(titlepage: &TitlePage) -> String {
     )
 }
 
+/// Exports the [TitlePage] element, meaning one of values that can be included
+/// on the [TitlePage] to a `html` string. If there are no [RichString]s we do not include
+/// the value on the [TitlePage], and only return `""` here.
 fn export_titlepage_element(value: &str, element: &Vec<RichString>) -> String {
     if element.is_empty() {
         return "".to_string();
