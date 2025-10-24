@@ -226,7 +226,7 @@ const FONTS: [&[u8]; 4] = [
 
 impl<'a> WorldPlay<'a> {
     fn new(content: String, book: &'a LazyHash<FontBook>, fonts: &'a Vec<Font>) -> Self {
-        let mut sources = HashMap::new();
+        let mut sources = HashMap::with_capacity(1);
         let main = create_source(MAIN, content);
         let main_id = main.id();
         sources.insert(main_id, main);
