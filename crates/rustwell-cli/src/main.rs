@@ -91,7 +91,7 @@ fn detect_target_from_path(path: &str) -> Result<Target> {
         .to_ascii_lowercase();
 
     let t = match ext.as_str() {
-        "typ" => Target::Typ,
+        "typ" | "typst" => Target::Typ,
         "html" | "htm" => Target::Html,
         "pdf" => Target::Pdf,
         _ => bail!("unkown extension '.{}'; specify -t/--target", ext),
