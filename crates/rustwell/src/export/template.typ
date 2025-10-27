@@ -88,11 +88,6 @@
 #let dialogue_raw(character, dialogue, paren: none, left_inset, left_inset_name, right_inset_name) = {
   context {
     set par(spacing: line_spacing(0))
-    let char_text = if type(character) == str {
-      character
-    } else {
-      character.text
-    }
     dialogue_counter.step()
     let dialogue_count = dialogue_counter.get().at(0)
     let dialogue_header_counter = counter("dialogue_header" + str(dialogue_count))
