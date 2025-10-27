@@ -114,10 +114,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Screenplay {
-            titlepage: self.title_page,
-            elements: self.elements,
-        }
+        Screenplay::new(self.title_page, self.elements)
     }
 
     /// `try_` is a helper function taking a predicate and a handle function
@@ -256,7 +253,10 @@ impl<'a> Parser<'a> {
                 let mut inner = inner;
                 if let Some(start) = inner.trim_end().strip_suffix('#') {
                     if let Some((new_inner, numbering)) = start.rsplit_once('#') {
-                        if numbering.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '.') {
+                        if numbering
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
+                        {
                             number = Some(numbering.to_string());
                             inner = new_inner;
                         }
