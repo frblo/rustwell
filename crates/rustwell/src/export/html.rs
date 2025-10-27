@@ -64,7 +64,7 @@ fn export_titlepage(titlepage: &TitlePage) -> String {
         export_titlepage_element("authors", &titlepage.authors),
         export_titlepage_element("source", &titlepage.source),
         export_titlepage_element("draft-date", &titlepage.draft_date),
-        export_titlepage_element("contact", &titlepage.title),
+        export_titlepage_element("contact", &titlepage.contact),
     )
 }
 
