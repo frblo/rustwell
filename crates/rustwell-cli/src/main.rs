@@ -31,7 +31,7 @@ struct Cli {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Target {
-    Typ,
+    Typst,
     Html,
     Pdf,
 }
@@ -91,7 +91,7 @@ fn detect_target_from_path(path: &str) -> Result<Target> {
         .to_ascii_lowercase();
 
     let t = match ext.as_str() {
-        "typ" | "typst" => Target::Typ,
+        "typ" => Target::Typst,
         "html" | "htm" => Target::Html,
         "pdf" => Target::Pdf,
         _ => bail!("unkown extension '.{}'; specify -t/--target", ext),
@@ -127,7 +127,7 @@ fn detect_name_from_path(path: &str) -> Result<&str> {
 
 fn extension_from_target(target: &Target) -> &'static str {
     match target {
-        Target::Typ => "typ",
+        Target::Typst => "typ",
         Target::Html => "html",
         Target::Pdf => "pdf",
     }
