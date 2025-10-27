@@ -8,6 +8,8 @@ pub mod screenplay;
 pub use screenplay::Screenplay;
 
 pub use export::export_html;
+pub use export::export_pdf;
+pub use export::export_typst;
 
 pub fn parse_str(src: &str) -> Screenplay {
     parser::parse(src)

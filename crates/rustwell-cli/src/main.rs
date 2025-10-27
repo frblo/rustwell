@@ -1,6 +1,7 @@
 use clap::{Parser, ValueEnum};
 use color_eyre::Result;
 use color_eyre::eyre::bail;
+use rustwell;
 
 use std::fs::File;
 use std::io;
@@ -50,7 +51,8 @@ fn main() -> Result<()> {
     let screenplay = rustwell::parse(&buf);
     match target {
         Target::Html => rustwell::export_html(&screenplay, &mut writer, true),
-        _ => unimplemented!("These aren't in main yet"),
+        Target::Pdf => rustwell::export_pdf(&screenplay, &mut writer),
+        Target::Typst => rustwell::export_typst(&screenplay, &mut writer),
     }
 
     Ok(())
