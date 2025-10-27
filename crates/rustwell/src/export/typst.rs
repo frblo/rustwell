@@ -108,7 +108,7 @@ fn export_element(element: &Element) -> String {
         Element::Lyrics(s) => format!("#lyrics[{}]", format_rich_string(s)),
         Element::Transition(s) => format!("#transition[{}]", format_rich_string(s)),
         Element::CenteredText(s) => format!("#centered[{}]", format_rich_string(s)),
-        Element::Note(s) => "".to_string(), // TODO: Implement when decided on what do to
+        Element::Note(_) => "".to_string(), // TODO: Implement when decided on what do to
         Element::PageBreak => "#pagebreak()".to_string(),
     }
 }
