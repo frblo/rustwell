@@ -2,7 +2,7 @@ use std::io::Write;
 
 use crate::{
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element, Screenplay},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay, TitlePage},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -29,6 +29,10 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
         }
     )
     .expect("Failed to write to output");
+    if let Some(titlepage) = &screenplay.titlepage {
+        writeln!(&mut writer, "{}", export_titlepage(titlepage))
+            .expect("Failed to write to output");
+    }
     for e in &screenplay.elements {
         writeln!(&mut writer, "{}", export_element(e)).expect("Failed to write to output");
     }
@@ -39,6 +43,45 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
 </html>"#
     )
     .expect("Failed to write to output");
+}
+
+/// Exports the [TitlePage] to a `html` string.
+fn export_titlepage(titlepage: &TitlePage) -> String {
+    format!(
+        r#"
+        <div id="title-page">
+            {}
+            {}
+            {}
+            {}
+            {}
+            {}
+        </div>
+    "#,
+        export_titlepage_element("title", &titlepage.title),
+        export_titlepage_element("credit", &titlepage.credit),
+        export_titlepage_element("authors", &titlepage.authors),
+        export_titlepage_element("source", &titlepage.source),
+        export_titlepage_element("draft-date", &titlepage.draft_date),
+        export_titlepage_element("contact", &titlepage.contact),
+    )
+}
+
+/// Exports the [TitlePage] element, meaning one of values that can be included
+/// on the [TitlePage] to a `html` string. If there are no [RichString]s we do not include
+/// the value on the [TitlePage], and only return `""` here.
+fn export_titlepage_element(value: &str, element: &Vec<RichString>) -> String {
+    if element.is_empty() {
+        return "".to_string();
+    }
+
+    let content = element
+        .iter()
+        .map(|s| format!("<p>{}</p>", format_rich_string(s)))
+        .collect::<Vec<String>>()
+        .concat();
+
+    format!(r#"<div class="{}">{}</div>"#, value, content)
 }
 
 /// Formats an [Element] into a `html`-[String].
