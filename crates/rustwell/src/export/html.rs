@@ -1,7 +1,6 @@
 use std::io::Write;
 
 use crate::{
-    export::styles::{NO_STYLE, Style, element_style},
     rich_string::{self, RichString},
     screenplay::{Dialogue, DialogueElement, Element, Screenplay, TitlePage},
 };
@@ -78,7 +77,7 @@ fn export_titlepage_element(value: &str, element: &Vec<RichString>) -> String {
 
     let content = element
         .iter()
-        .map(|s| format!("<p>{}</p>", format_rich_string(s, &NO_STYLE)))
+        .map(|s| format!("<p>{}</p>", format_rich_string(s)))
         .collect::<Vec<String>>()
         .concat();
 
@@ -87,7 +86,6 @@ fn export_titlepage_element(value: &str, element: &Vec<RichString>) -> String {
 
 /// Formats an [Element] into a `html`-[String].
 fn export_element(element: &Element) -> String {
-    let style = element_style(element);
     match element {
         Element::Heading { slug, number } => {
             format!(
@@ -97,7 +95,7 @@ fn export_element(element: &Element) -> String {
                 } else {
                     "".to_string()
                 },
-                format_rich_string(slug, style),
+                format_rich_string(slug),
                 if let Some(x) = number {
                     format!(r#"<span class="scnumr">{}</span>"#, x)
                 } else {
@@ -107,12 +105,12 @@ fn export_element(element: &Element) -> String {
         }
         Element::Action(s) => format!(
             r#"<div class="action"><p>{}</p></div>"#,
-            format_rich_string(s, style)
+            format_rich_string(s)
         ),
         Element::Dialogue(dialogue) => format!(
             r#"<div class="dialog"><p class="character">{}</p>{}</div>"#,
-            format_character(&dialogue, style),
-            format_dialogue(&dialogue.elements, style),
+            format_character(&dialogue),
+            format_dialogue(&dialogue.elements),
         ),
         Element::DualDialogue(dialogue1, dialogue2) => format!(
             r#"<div class="dual">
@@ -125,101 +123,89 @@ fn export_element(element: &Element) -> String {
                     {}
                 </div>
             </div>"#,
-            format_character(&dialogue1, style),
-            format_dialogue(&dialogue1.elements, style),
-            format_character(&dialogue2, style),
-            format_dialogue(&dialogue2.elements, style),
+            format_character(&dialogue1),
+            format_dialogue(&dialogue1.elements),
+            format_character(&dialogue2),
+            format_dialogue(&dialogue2.elements),
         ),
         Element::Lyrics(s) => format!(
             r#"<div class="lyrics"><p>{}</p></div>"#,
-            format_rich_string(s, style)
+            format_rich_string(s)
         ),
         Element::Transition(s) => {
-            format!(
-                r#"<div class="transition">{}</div>"#,
-                format_rich_string(s, style)
-            )
+            format!(r#"<div class="transition">{}</div>"#, format_rich_string(s))
         }
         Element::CenteredText(s) => format!(
             r#"<div class="action centered"><p>{}</p></div>"#,
-            format_rich_string(s, style)
+            format_rich_string(s)
         ),
         Element::Note(s) => format!(
             r#"<div class="note"><p>{}</p></div>"#,
-            format_rich_string(s, style)
+            format_rich_string(s)
         ),
         Element::PageBreak => "".to_string(), // No pagebreaks in html
     }
 }
 
-fn format_character(dialogue: &Dialogue, style: &Style) -> String {
+fn format_character(dialogue: &Dialogue) -> String {
     if let Some(extension) = &dialogue.extension {
         format!(
             "{} ({})",
-            format_rich_string(&dialogue.character, style),
-            format_rich_string(extension, style)
+            format_rich_string(&dialogue.character),
+            format_rich_string(extension)
         )
     } else {
-        format_rich_string(&dialogue.character, style)
+        format_rich_string(&dialogue.character)
     }
 }
 
 /// Formats a [RichString] into a `html`-[String].
-fn format_rich_string(str: &RichString, style: &Style) -> String {
+fn format_rich_string(str: &RichString) -> String {
     str.elements
         .iter()
-        .map(|e| format_rich_element(e, style))
+        .map(|e| format_rich_element(e))
         .collect::<Vec<String>>()
         .concat()
 }
 
 /// Formats a [RichString] [rich_string::Element] into a `html`-[String].
-/// Here the [Style] is taken into consideration and will overrule any styling
-/// in the [rich_string::Element], if it's [Some] in the given [Style].
-fn format_rich_element(element: &rich_string::Element, style: &Style) -> String {
+fn format_rich_element(element: &rich_string::Element) -> String {
     // Assumes newlines '\n' will only occur sole elements
     if element.text == "\n" {
         return "<br />".to_string();
     }
-    let bold = (style.bold.is_none() && element.is_bold()) || style.bold.unwrap_or(false);
-    let italic = (style.italic.is_none() && element.is_italic()) || style.italic.unwrap_or(false);
-    let underline =
-        (style.underline.is_none() && element.is_underline()) || style.underline.unwrap_or(false);
 
     let prepend = format!(
         "{}{}{}",
-        if bold { "<strong>" } else { "" },
-        if italic { "<em>" } else { "" },
-        if underline { "<u>" } else { "" },
+        if element.is_bold() { "<strong>" } else { "" },
+        if element.is_italic() { "<em>" } else { "" },
+        if element.is_underline() { "<u>" } else { "" },
     );
     let append = format!(
         "{}{}{}",
-        if underline { "</u>" } else { "" },
-        if italic { "</em>" } else { "" },
-        if bold { "</strong>" } else { "" },
+        if element.is_underline() { "</u>" } else { "" },
+        if element.is_italic() { "</em>" } else { "" },
+        if element.is_bold() { "</strong>" } else { "" },
     );
     format!("{prepend}{}{append}", element.text)
 }
 
 /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
 /// [DialogueElement]s.
-fn format_dialogue(dialogue: &Vec<DialogueElement>, style: &Style) -> String {
+fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
     dialogue
         .iter()
-        .map(|d| format_dialogue_element(d, style))
+        .map(format_dialogue_element)
         .collect::<Vec<String>>()
         .join("\n")
 }
 
 /// Formats a [DialogueElement] into a `html`-[String].
-fn format_dialogue_element(element: &DialogueElement, style: &Style) -> String {
+fn format_dialogue_element(element: &DialogueElement) -> String {
     match element {
         DialogueElement::Parenthetical(s) => {
-            format!(
-                r#"<p class="parenthetical">{}</p>"#,
-                format_rich_string(s, style)
-            )
+            format!(r#"<p class="parenthetical">{}</p>"#, format_rich_string(s))
         }
-        DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, format_rich_string(s, style)),
+        DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, format_rich_string(s)),
     }
 }
