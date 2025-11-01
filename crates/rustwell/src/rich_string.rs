@@ -84,12 +84,11 @@ impl RichString {
             return;
         }
 
-        if let Some(last) = self.elements.last_mut() {
-            if last.attributes == attributes {
+        if let Some(last) = self.elements.last_mut()
+            && last.attributes == attributes {
                 last.text.push_str(&text);
                 return;
             }
-        }
 
         self.elements.push(Element { text, attributes });
     }

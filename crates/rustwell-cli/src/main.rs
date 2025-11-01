@@ -1,7 +1,6 @@
 use clap::{Parser, ValueEnum};
 use color_eyre::Result;
 use color_eyre::eyre::bail;
-use rustwell;
 
 use std::fs::File;
 use std::io;

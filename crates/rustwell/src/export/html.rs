@@ -70,7 +70,7 @@ fn export_titlepage(titlepage: &TitlePage) -> String {
 /// Exports the [TitlePage] element, meaning one of values that can be included
 /// on the [TitlePage] to a `html` string. If there are no [RichString]s we do not include
 /// the value on the [TitlePage], and only return `""` here.
-fn export_titlepage_element(value: &str, element: &Vec<RichString>) -> String {
+fn export_titlepage_element(value: &str, element: &[RichString]) -> String {
     if element.is_empty() {
         return "".to_string();
     }
@@ -109,7 +109,7 @@ fn export_element(element: &Element) -> String {
         ),
         Element::Dialogue(dialogue) => format!(
             r#"<div class="dialog"><p class="character">{}</p>{}</div>"#,
-            format_character(&dialogue),
+            format_character(dialogue),
             format_dialogue(&dialogue.elements),
         ),
         Element::DualDialogue(dialogue1, dialogue2) => format!(
@@ -123,9 +123,9 @@ fn export_element(element: &Element) -> String {
                     {}
                 </div>
             </div>"#,
-            format_character(&dialogue1),
+            format_character(dialogue1),
             format_dialogue(&dialogue1.elements),
-            format_character(&dialogue2),
+            format_character(dialogue2),
             format_dialogue(&dialogue2.elements),
         ),
         Element::Lyrics(s) => format!(
@@ -163,7 +163,7 @@ fn format_character(dialogue: &Dialogue) -> String {
 fn format_rich_string(str: &RichString) -> String {
     str.elements
         .iter()
-        .map(|e| format_rich_element(e))
+        .map(format_rich_element)
         .collect::<Vec<String>>()
         .concat()
 }
@@ -192,7 +192,7 @@ fn format_rich_element(element: &rich_string::Element) -> String {
 
 /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
 /// [DialogueElement]s.
-fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
+fn format_dialogue(dialogue: &[DialogueElement]) -> String {
     dialogue
         .iter()
         .map(format_dialogue_element)

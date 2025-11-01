@@ -118,7 +118,7 @@ fn export_element(element: &Element) -> String {
 }
 
 /// Formats the dialogue into [typst] code.
-fn format_dialogue(dialogue: &Vec<DialogueElement>) -> String {
+fn format_dialogue(dialogue: &[DialogueElement]) -> String {
     dialogue
         .iter()
         .map(format_dialogue_element)
@@ -197,7 +197,7 @@ fn replace_escaping(s: &str) -> String {
 
 /// Formats a single [crate::screenplay::TitlePage] element into [typst] code.
 /// If no value has been declared it will return `"none"`.
-fn format_titlepage_element(element: &Vec<RichString>) -> String {
+fn format_titlepage_element(element: &[RichString]) -> String {
     if element.is_empty() {
         return "none".to_string();
     }

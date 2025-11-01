@@ -156,13 +156,12 @@ impl<'a> Parser<'a> {
             line,
             |_, s| s.trim().strip_prefix('>').and_then(|u| u.strip_suffix('<')),
             |this, inner| {
-                if this.state == State::InBlock {
-                    if let Some(Element::CenteredText(rs)) = this.elements.last_mut() {
+                if this.state == State::InBlock
+                    && let Some(Element::CenteredText(rs)) = this.elements.last_mut() {
                         rs.push_str("\n");
                         rs.push_str(inner);
                         return;
                     }
-                }
 
                 let rs = RichString::from(inner);
                 this.elements.push(Element::CenteredText(rs));
@@ -177,13 +176,12 @@ impl<'a> Parser<'a> {
             line,
             |_, s| s.trim_start().strip_prefix('~'),
             |this, inner| {
-                if this.state == State::InBlock {
-                    if let Some(Element::Lyrics(rs)) = this.elements.last_mut() {
+                if this.state == State::InBlock
+                    && let Some(Element::Lyrics(rs)) = this.elements.last_mut() {
                         rs.push_str("\n");
                         rs.push_str(inner);
                         return;
                     }
-                }
 
                 let rs = RichString::from(inner);
                 this.elements.push(Element::Lyrics(rs));
@@ -198,13 +196,12 @@ impl<'a> Parser<'a> {
             line,
             |_, line| Some(line),
             |this, inner| {
-                if this.state == State::InBlock {
-                    if let Some(Element::Action(rs)) = this.elements.last_mut() {
+                if this.state == State::InBlock
+                    && let Some(Element::Action(rs)) = this.elements.last_mut() {
                         rs.push_str("\n");
                         rs.push_str(inner);
                         return;
                     }
-                }
 
                 let rs = RichString::from(inner);
                 this.elements.push(Element::Action(rs));
@@ -251,17 +248,15 @@ impl<'a> Parser<'a> {
             |this, inner| {
                 let mut number = None;
                 let mut inner = inner;
-                if let Some(start) = inner.trim_end().strip_suffix('#') {
-                    if let Some((new_inner, numbering)) = start.rsplit_once('#') {
-                        if numbering
+                if let Some(start) = inner.trim_end().strip_suffix('#')
+                    && let Some((new_inner, numbering)) = start.rsplit_once('#')
+                        && numbering
                             .chars()
                             .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
                         {
                             number = Some(numbering.to_string());
                             inner = new_inner;
                         }
-                    }
-                }
 
                 this.elements.push(Element::Heading {
                     slug: RichString::from(inner),
@@ -286,14 +281,12 @@ impl<'a> Parser<'a> {
     fn insert_empty_dialogue<'s>(&mut self, inner: &'s str) -> &'s str {
         let new_dialogue = Dialogue::new();
 
-        if let Some(stripped) = inner.trim_end().strip_suffix('^') {
-            if let Some(&Element::Dialogue(_)) = self.elements.last() {
-                if let Some(Element::Dialogue(d)) = self.elements.pop() {
+        if let Some(stripped) = inner.trim_end().strip_suffix('^')
+            && let Some(&Element::Dialogue(_)) = self.elements.last()
+                && let Some(Element::Dialogue(d)) = self.elements.pop() {
                     self.elements.push(Element::DualDialogue(d, new_dialogue));
                     return stripped;
                 }
-            }
-        }
 
         self.elements.push(Element::Dialogue(new_dialogue));
         inner
@@ -320,12 +313,11 @@ impl<'a> Parser<'a> {
                     .get_last_dialogue()
                     .expect("Just pushed to list, must exist");
 
-                if let Some((head, tail)) = inner.split_once('(') {
-                    if let Some((extension, _)) = tail.split_once(')') {
+                if let Some((head, tail)) = inner.split_once('(')
+                    && let Some((extension, _)) = tail.split_once(')') {
                         curr_dialogue.extension = Some(RichString::from(extension));
                         inner = head.trim_end();
                     }
-                }
 
                 curr_dialogue.character = RichString::from(inner);
 
@@ -338,11 +330,10 @@ impl<'a> Parser<'a> {
         self.try_(
             line,
             |this, line| {
-                if let Some(inner) = line.trim_start().strip_prefix('>') {
-                    if !line.trim_end().ends_with('<') {
+                if let Some(inner) = line.trim_start().strip_prefix('>')
+                    && !line.trim_end().ends_with('<') {
                         return Some(inner);
                     }
-                }
 
                 let transition_ending = line.ends_with("TO:");
                 let has_lower = line.chars().any(char::is_lowercase);
