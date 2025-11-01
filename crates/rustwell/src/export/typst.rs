@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io::Write};
 
 use typst::{
-    self, Library,
+    self, Library, LibraryExt,
     diag::{FileError, FileResult},
     foundations::{Bytes, Datetime},
     layout::PagedDocument,
