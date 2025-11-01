@@ -84,7 +84,11 @@ fn export_element(element: &Element) -> String {
     match element {
         Element::Heading { slug, number } => {
             if let Some(num) = number {
-                format!("#scene(number: {num})[{}]", format_rich_string(slug))
+                format!(
+                    r#"#scene(number: "{}")[{}]"#,
+                    replace_escaping(num),
+                    format_rich_string(slug)
+                )
             } else {
                 format!("#scene[{}]", format_rich_string(slug))
             }
@@ -176,13 +180,19 @@ fn format_rich_element(element: &rich_string::Element) -> String {
         } else {
             ""
         },
-        element.text.replace("\\", "\\\\").replace("\"", "\\\"")
+        replace_escaping(&element.text)
     );
     if element.is_underline() {
         out = format!("#underline[{}]", out);
     }
 
     out
+}
+
+/// This function also iterates over each string twice to replace all escaping
+/// characters `\` and `"` with `\\` and `\*` respectively.
+fn replace_escaping(s: &str) -> String {
+    s.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
 /// Formats a single [crate::screenplay::TitlePage] element into [typst] code.
