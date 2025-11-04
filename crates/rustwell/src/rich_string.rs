@@ -468,6 +468,12 @@ where
     }
 }
 
+impl From<&RichString> for String {
+    fn from(rs: &RichString) -> Self {
+        "".to_string()
+    }
+}
+
 /// An intermediate iterator which allows for seamless iteration over the [Chars] inside a
 /// [`RichString`].
 pub struct RichIterator<'a> {
