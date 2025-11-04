@@ -85,10 +85,11 @@ impl RichString {
         }
 
         if let Some(last) = self.elements.last_mut()
-            && last.attributes == attributes {
-                last.text.push_str(&text);
-                return;
-            }
+            && last.attributes == attributes
+        {
+            last.text.push_str(&text);
+            return;
+        }
 
         self.elements.push(Element { text, attributes });
     }
@@ -108,6 +109,12 @@ where
         let mut out = RichString::new();
         out.push_str(str);
         out
+    }
+}
+
+impl From<&RichString> for String {
+    fn from(rs: &RichString) -> Self {
+        "".to_string()
     }
 }
 

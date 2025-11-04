@@ -2,6 +2,7 @@ use std::io::Read;
 
 mod export;
 mod parser;
+mod statistics;
 
 pub mod rich_string;
 pub mod screenplay;
