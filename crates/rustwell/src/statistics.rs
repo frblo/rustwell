@@ -20,21 +20,39 @@ struct CharacterStats {
 
 impl Statistics {
     pub fn new(screenplay: &Screenplay) -> Self {
-        let mut character_idx = HashMap::new();
+        let mut character_idx: HashMap<RichString, usize> = HashMap::new();
         let mut character_counter = 0;
 
         let mut lines_count = Vec::new();
         // let mut words = Vec::new();
-        let mut scenes = Vec::new();
+        // let mut scenes = Vec::new();
 
-        let mut characters_in_scenes = vec![HashSet::new()];
+        // let mut characters_in_scenes = vec![HashSet::new()];
 
         let mut scene = 0;
-        for e in screenplay.elements {
+        for e in &screenplay.elements {
             match e {
                 Element::Heading { slug: _, number: _ } => scene += 1,
-                Element::Dialogue(dialogue) => {}
-                Element::DualDialogue(dialogue, dialogue1) => todo!(),
+                Element::Dialogue(dialogue) => handle_dialogue(
+                    dialogue,
+                    &mut character_idx,
+                    &mut character_counter,
+                    &mut lines_count,
+                ),
+                Element::DualDialogue(dialogue1, dialogue2) => {
+                    handle_dialogue(
+                        dialogue1,
+                        &mut character_idx,
+                        &mut character_counter,
+                        &mut lines_count,
+                    );
+                    handle_dialogue(
+                        dialogue2,
+                        &mut character_idx,
+                        &mut character_counter,
+                        &mut lines_count,
+                    );
+                }
                 _ => continue,
             }
         }
@@ -56,20 +74,20 @@ impl Statistics {
 
 fn handle_dialogue(
     dialogue: &Dialogue,
-    character_idx: &mut HashMap<&RichString, usize>,
+    character_idx: &mut HashMap<RichString, usize>,
     character_counter: &mut usize,
     lines_count: &mut Vec<usize>,
 ) {
-    let name = &dialogue.character;
-    let idx = character_idx.get(&name).unwrap_or_else(|| {
-        let i = *character_counter;
+    let name = dialogue.character.clone();
+    let idx = character_idx.get(&name).cloned().unwrap_or_else(|| {
+        let i = character_counter.clone();
         *character_counter += 1;
 
-        character_idx.insert(&name, i);
+        character_idx.insert(name, i);
         lines_count.push(0);
 
-        &i
+        i
     });
 
-    lines_count[*idx] += 1;
+    lines_count[idx] += 1;
 }

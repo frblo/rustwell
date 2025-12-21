@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use bitflags::bitflags;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 /// A [String] that can have different parts styled.
 ///
 /// New lines will always appear as their own non syled element.
@@ -103,8 +103,8 @@ impl Default for RichString {
     }
 }
 
-impl Hash for &RichString {
-    fn hash<H: std::hash::Hasher>(self, state: &mut H) {
+impl Hash for RichString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let s: String = self.into();
         s.hash(state);
     }
@@ -127,7 +127,7 @@ impl From<&RichString> for String {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Element {
     pub text: String,
     attributes: Attributes,
