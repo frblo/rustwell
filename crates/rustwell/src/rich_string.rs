@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 /// A [String] that can have different parts styled.
 ///
 /// New lines will always appear as their own non syled element.
@@ -85,10 +85,11 @@ impl RichString {
         }
 
         if let Some(last) = self.elements.last_mut()
-            && last.attributes == attributes {
-                last.text.push_str(&text);
-                return;
-            }
+            && last.attributes == attributes
+        {
+            last.text.push_str(&text);
+            return;
+        }
 
         self.elements.push(Element { text, attributes });
     }
@@ -111,7 +112,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Element {
     pub text: String,
     attributes: Attributes,

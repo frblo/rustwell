@@ -1,6 +1,6 @@
 use crate::rich_string::RichString;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Screenplay {
     pub titlepage: Option<TitlePage>,
     pub elements: Vec<Element>,
@@ -19,7 +19,7 @@ impl Screenplay {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Element {
     Heading {
         slug: RichString,
@@ -35,7 +35,7 @@ pub enum Element {
     PageBreak,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Dialogue {
     pub character: RichString,
     pub extension: Option<RichString>,
@@ -58,13 +58,13 @@ impl Default for Dialogue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DialogueElement {
     Parenthetical(RichString),
     Line(RichString),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TitlePage {
     pub title: Vec<RichString>,
     pub credit: Vec<RichString>,
