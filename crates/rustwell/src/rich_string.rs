@@ -4,7 +4,7 @@
 //! # Examples
 //!
 //! ```
-//! use rustwell::rich_string;
+//! use rustwell::rich_string::RichString;
 //!
 //! let rs: RichString = "_Hello _**world!**".into();
 //!
@@ -33,7 +33,7 @@ use bitflags::bitflags;
 /// # Examples
 ///
 /// ```
-/// use rustwell::rich_string;
+/// use rustwell::rich_string::RichString;
 ///
 /// let mut rs = RichString::new();
 /// rs.push_str("Hello **world!**");
