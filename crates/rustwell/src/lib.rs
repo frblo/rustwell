@@ -4,7 +4,7 @@
 //!
 //! The crate can be used both for the whole compilation process, but also as an intermediary step
 //! for parsing *Fountain* text into an abstract syntax tree (AST) that can then be used when
-//! constructing a new exporter.
+//! constructing new exporters.
 //!
 //! # Examples
 //!

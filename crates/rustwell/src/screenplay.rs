@@ -1,3 +1,6 @@
+//! This module implements the [Screenplay] AST with all the components of a screenplay, to be
+//! easily exported to any format.
+
 use crate::rich_string::RichString;
 
 /// A (very flat) abstract syntax tree consisting of the entirety of a screenplay and well as the

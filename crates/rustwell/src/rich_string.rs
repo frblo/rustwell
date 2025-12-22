@@ -1,3 +1,19 @@
+//! This module implements a [RichString], meaning a *rich* string which can have multiple
+//! attributes for style, and can have these on different parts of the same string.
+//!
+//! # Examples
+//!
+//! ```
+//! use rustwell::rich_string;
+//!
+//! let rs: RichString = "_Hello _**world!**".into();
+//!
+//! assert_eq!(rs.elements[0].text, "Hello ".to_string());
+//! assert!(rs.elements[0].is_underline());
+//! assert_eq!(rs.elements[1].text, "world!".to_string());
+//! assert!(rs.elements[1].is_bold());
+//! ```
+
 use bitflags::bitflags;
 
 /// A string that can have different parts styled.
@@ -6,11 +22,12 @@ use bitflags::bitflags;
 /// The [RichString] is comprised of a collection of [Element]s that each hold a [String] and a
 /// combination of stylings. The available styles are:
 ///
-/// - `**bold**`
-/// - `*italic*`
-/// - `_underline_`
+/// - `**bold**` → **bold**
+/// - `*italic*` → *italic*
+/// - `_underline_` → <u>underline</u>
 ///
-/// and these can be combined in any overlapping order. Use `\` for a styling character to be
+/// as specified in the [Fountain specification](https://fountain.io/syntax/). Furthermore,
+/// these can be combined in any overlapping order. Use `\` for a styling character to be
 /// ignored for style parsing.
 ///
 /// # Examples
