@@ -1,12 +1,20 @@
+//! This module implements the [Screenplay] AST with all the components of a screenplay, to be
+//! easily exported to any format.
+
 use crate::rich_string::RichString;
 
-#[derive(Debug)]
+/// A (very flat) abstract syntax tree consisting of the entirety of a screenplay and well as the
+/// information for the title page of the screenplay.
+///
+/// Contains both a [`Option<TitlePage>`] and a [`Vec<Element>`], which are the screenplay components.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Screenplay {
     pub titlepage: Option<TitlePage>,
     pub elements: Vec<Element>,
 }
 
 impl Screenplay {
+    /// Create a new [Screenplay].
     pub fn new(titlepage: Option<TitlePage>, elements: Vec<Element>) -> Self {
         Self {
             titlepage,
@@ -14,12 +22,14 @@ impl Screenplay {
         }
     }
 
+    /// Set the [TitlePage] on a [Screenplay].
     pub fn set_titlepage(&mut self, titlepage: Option<TitlePage>) {
         self.titlepage = titlepage;
     }
 }
 
-#[derive(Debug)]
+/// The components of a [Screenplay], like scene headings, action, dialogue, etc.
+#[derive(Debug, PartialEq, Eq)]
 pub enum Element {
     Heading {
         slug: RichString,
@@ -35,7 +45,13 @@ pub enum Element {
     PageBreak,
 }
 
-#[derive(Debug)]
+/// Dialogue consisting of a character name, an extension, parentheticals and lines.
+/// A single [Dialogue] can have multiple parentheticals and lines.
+///
+/// NAME (extension)
+/// (parenthetical)
+/// Line.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Dialogue {
     pub character: RichString,
     pub extension: Option<RichString>,
@@ -43,6 +59,7 @@ pub struct Dialogue {
 }
 
 impl Dialogue {
+    /// Creates an empty [Dialogue].
     pub fn new() -> Self {
         Self {
             character: RichString::new(),
@@ -58,13 +75,15 @@ impl Default for Dialogue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DialogueElement {
     Parenthetical(RichString),
     Line(RichString),
 }
 
-#[derive(Debug)]
+/// The information for a title page. Each field may be empty as none are strictly required
+/// according to the fountain specification.
+#[derive(Debug, PartialEq, Eq)]
 pub struct TitlePage {
     pub title: Vec<RichString>,
     pub credit: Vec<RichString>,
@@ -75,6 +94,7 @@ pub struct TitlePage {
 }
 
 impl TitlePage {
+    /// Creates a new empty [TitlePage].
     pub fn new() -> Self {
         Self {
             title: Vec::new(),

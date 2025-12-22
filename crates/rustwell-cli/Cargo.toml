@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [[bin]]
-name = "rustwell"
+name = "rustwell-cli"
 path = "src/main.rs"
 
 [dependencies]
