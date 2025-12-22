@@ -1,8 +1,8 @@
 # rustwell
 
-Like *fountain*, but written in *Rust* and it works *well*.
+Like *Fountain*, but written in *Rust* and it works *well*.
 
-Rustwell is a tool for creating formatted screen- and stageplays, based on [fountain](https://fountain.io/). Rustwell is both a parser and compiler crate for *fountain*, but also contains a CLI tool for parsing and exporting formatted documents from *fountain* script.
+Rustwell is a tool for creating formatted screen- and stageplays, based on [Fountain](https://fountain.io/). Rustwell is both a parser and compiler crate for *Fountain*, but also contains a CLI tool for parsing and exporting formatted documents from *Fountain* script.
 
 ## Usage
 

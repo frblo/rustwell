@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 
-/// A [String] that can have different parts styled.
+/// A string that can have different parts styled.
 ///
 /// New lines will always appear as their own non styled element.
 /// The [RichString] is comprised of a collection of [Element]s that each hold a [String] and a
@@ -137,8 +137,8 @@ where
     }
 }
 
-/// A [RichString] component, containing a [String] and the style [Attributes]
-/// belonging to said [String].
+/// A [RichString] component, containing a [String] and the style attributes
+/// belonging to said string.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Element {
     pub text: String,
@@ -146,8 +146,8 @@ pub struct Element {
 }
 
 impl Element {
-    /// Creates a new [Element] based on a [String] with no attributes. Does not parse the
-    /// [String].
+    /// Creates a new element based on a [String] with no attributes. Does not parse the
+    /// string.
     pub fn new(text: String) -> Self {
         Self {
             text,
@@ -155,17 +155,17 @@ impl Element {
         }
     }
 
-    /// If the [Element] is styled as bold.
+    /// If the element is styled as bold.
     pub fn is_bold(&self) -> bool {
         self.attributes.contains(Attributes::BOLD)
     }
 
-    /// If the [Element] is styled as italic.
+    /// If the element is styled as underline.
     pub fn is_underline(&self) -> bool {
         self.attributes.contains(Attributes::UNDERLINE)
     }
 
-    /// If the [Element] is styled as underline.
+    /// If the element is styled as italic.
     pub fn is_italic(&self) -> bool {
         self.attributes.contains(Attributes::ITALIC)
     }
@@ -174,7 +174,7 @@ impl Element {
 bitflags! {
     /// A bit array keeping track of style attributes for a [RichString].
     #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-    pub struct Attributes: u8 {
+    struct Attributes: u8 {
         const BOLD      = 0b001;
         const UNDERLINE = 0b010;
         const ITALIC    = 0b100;

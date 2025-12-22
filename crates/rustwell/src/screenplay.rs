@@ -3,7 +3,7 @@ use crate::rich_string::RichString;
 /// A (very flat) abstract syntax tree consisting of the entirety of a screenplay and well as the
 /// information for the title page of the screenplay.
 ///
-/// Contains both a [Option<TitlePage>] and a [Vec<Element>], which is the screenplay components.
+/// Contains both a [`Option<TitlePage>`] and a [`Vec<Element>`], which are the screenplay components.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Screenplay {
     pub titlepage: Option<TitlePage>,

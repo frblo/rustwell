@@ -60,8 +60,7 @@ impl<'a> Parser<'a> {
     /// Main entry point for parser
     ///
     /// Starts by parsing a potential title. Before moving on to the main loop.
-    /// A line with two or more spaces is always treated as intentional empty
-    /// lines.
+    /// A line with two or more spaces is always treated as intentional empty lines.
     ///
     /// Might seem like trimming is used a lot. The intention is that the
     /// try functions work without having trimmed. Cost is extremely low when
