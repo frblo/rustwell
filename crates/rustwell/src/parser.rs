@@ -504,7 +504,7 @@ mod tests {
         let correct = Screenplay::new(
             None,
             vec![Element::Heading {
-                slug: "INT. OUTSIDE - DAY ".into(),
+                slug: "INT. OUTSIDE - DAY".into(),
                 number: Some("S.1".to_string()),
             }],
         );

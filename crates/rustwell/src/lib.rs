@@ -45,11 +45,6 @@ pub use export::export_html;
 pub use export::export_pdf;
 pub use export::export_typst;
 
-/// Parses a Fountain source string into a [`Screenplay`] structure.
-pub fn parse_str(src: &str) -> Screenplay {
-    parser::parse(src)
-}
-
 /// Parses a Fountain source file into a [`Screenplay`] structure.
 pub fn parse_reader(mut r: impl Read) -> Screenplay {
     let mut src = String::new();

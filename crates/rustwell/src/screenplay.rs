@@ -72,7 +72,6 @@ impl Default for Dialogue {
     }
 }
 
-/// Either a parenthetical or a line.
 #[derive(Debug, PartialEq, Eq)]
 pub enum DialogueElement {
     Parenthetical(RichString),
