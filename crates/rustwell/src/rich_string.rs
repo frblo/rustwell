@@ -1,20 +1,45 @@
 use bitflags::bitflags;
 
-#[derive(Debug, PartialEq, Eq)]
 /// A [String] that can have different parts styled.
 ///
-/// New lines will always appear as their own non syled element.
+/// New lines will always appear as their own non styled element.
+/// The [RichString] is comprised of a collection of [Element]s that each hold a [String] and a
+/// combination of stylings. The available styles are:
+///
+/// - `**bold**`
+/// - `*italic*`
+/// - `_underline_`
+///
+/// and these can be combined in any overlapping order. Use `\` for a styling character to be
+/// ignored for style parsing.
+///
+/// # Examples
+///
+/// ```
+/// use rustwell::rich_string;
+///
+/// let mut rs = RichString::new();
+/// rs.push_str("Hello **world!**");
+///
+/// assert_eq!(rs.elements[0].text, "Hello ".to_string());
+/// assert_eq!(rs.elements[1].text, "world!".to_string());
+/// assert!(rs.elements[1].is_bold());
+/// ```
+#[derive(Debug, PartialEq, Eq)]
 pub struct RichString {
     pub elements: Vec<Element>,
 }
 
 impl RichString {
+    /// Create a new, empty, [RichString].
     pub fn new() -> Self {
         RichString {
             elements: Vec::new(),
         }
     }
 
+    /// Pushes a string onto the [RichString]. Will divide the string into multiple elements with
+    /// different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
         let s = str.as_ref();
         let bytes = s.as_bytes();
@@ -112,6 +137,8 @@ where
     }
 }
 
+/// A [RichString] component, containing a [String] and the style [Attributes]
+/// belonging to said [String].
 #[derive(Debug, PartialEq, Eq)]
 pub struct Element {
     pub text: String,
@@ -119,6 +146,8 @@ pub struct Element {
 }
 
 impl Element {
+    /// Creates a new [Element] based on a [String] with no attributes. Does not parse the
+    /// [String].
     pub fn new(text: String) -> Self {
         Self {
             text,
@@ -126,24 +155,95 @@ impl Element {
         }
     }
 
+    /// If the [Element] is styled as bold.
     pub fn is_bold(&self) -> bool {
         self.attributes.contains(Attributes::BOLD)
     }
 
+    /// If the [Element] is styled as italic.
     pub fn is_underline(&self) -> bool {
         self.attributes.contains(Attributes::UNDERLINE)
     }
 
+    /// If the [Element] is styled as underline.
     pub fn is_italic(&self) -> bool {
         self.attributes.contains(Attributes::ITALIC)
     }
 }
 
 bitflags! {
+    /// A bit array keeping track of style attributes for a [RichString].
     #[derive(Debug, PartialEq, Eq, Clone, Copy)]
     pub struct Attributes: u8 {
         const BOLD      = 0b001;
         const UNDERLINE = 0b010;
         const ITALIC    = 0b100;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_bold() {
+        let mut rs = RichString::new();
+        rs.push_str("**text**");
+
+        assert!(rs.elements[0].is_bold());
+        assert_eq!(rs.elements[0].text, "text".to_string());
+    }
+
+    #[test]
+    fn parses_italic() {
+        let mut rs = RichString::new();
+        rs.push_str("*text*");
+
+        assert!(rs.elements[0].is_italic());
+        assert_eq!(rs.elements[0].text, "text".to_string());
+    }
+
+    #[test]
+    fn parses_underline() {
+        let mut rs = RichString::new();
+        rs.push_str("_text_");
+
+        assert!(rs.elements[0].is_underline());
+        assert_eq!(rs.elements[0].text, "text".to_string());
+    }
+
+    #[test]
+    fn parses_overlapping_styles() {
+        let mut rs = RichString::new();
+        rs.push_str("t_e**x**t_");
+
+        assert!(!rs.elements[0].is_bold());
+        assert!(!rs.elements[0].is_italic());
+        assert!(!rs.elements[0].is_underline());
+        assert_eq!(rs.elements[0].text, "t".to_string());
+
+        assert!(!rs.elements[1].is_bold());
+        assert!(!rs.elements[1].is_italic());
+        assert!(rs.elements[1].is_underline());
+        assert_eq!(rs.elements[1].text, "e".to_string());
+
+        assert!(rs.elements[2].is_bold());
+        assert!(!rs.elements[2].is_italic());
+        assert!(rs.elements[2].is_underline());
+        assert_eq!(rs.elements[2].text, "x".to_string());
+
+        assert!(!rs.elements[3].is_bold());
+        assert!(!rs.elements[3].is_italic());
+        assert!(rs.elements[3].is_underline());
+        assert_eq!(rs.elements[3].text, "t".to_string());
+    }
+
+    #[test]
+    fn perser_ignores_backslash() {
+        let mut rs = RichString::new();
+        rs.push_str(r#"\*text\*"#);
+
+        assert!(!rs.elements[0].is_italic());
+        assert_eq!(rs.elements[0].text, "*text*".to_string());
     }
 }
