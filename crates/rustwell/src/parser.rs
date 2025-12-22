@@ -155,6 +155,7 @@ impl<'a> Parser<'a> {
             line,
             |_, s| s.trim().strip_prefix('>').and_then(|u| u.strip_suffix('<')),
             |this, inner| {
+                let inner = inner.trim();
                 if this.state == State::InBlock
                     && let Some(Element::CenteredText(rs)) = this.elements.last_mut()
                 {
