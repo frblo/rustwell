@@ -10,7 +10,7 @@ use std::str::Lines;
 /// Parses a Fountain source string into a [`Screenplay`] structure.
 ///
 /// Preprocesses the source text by removing
-/// comments and normalizing tabs to spaces
+/// comments and normalizing tabs to spaces.
 ///
 /// # Examples
 ///
