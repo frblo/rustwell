@@ -1,36 +1,14 @@
-# rustwell
+# Rustwell
 
 Like *Fountain*, but written in *Rust* and it works *well*.
 
 Rustwell is a tool for creating formatted screen- and stageplays, based on [Fountain](https://fountain.io/). Rustwell is both a parser and compiler crate for *Fountain*, but also contains a CLI tool for parsing and exporting formatted documents from *Fountain* script.
 
+This repository contains both the Rustwell library, and the Rustwell-CLI tool as an interface for Rustwell.
+
 ## Usage
 
-### Crate
-
-Add this dependency to your `Cargo.toml`:
-
-```toml
-[dependencies]
-rustwell = "0.1"
-```
-
-and then start using the library. Please read the documentation for more details on how to use the library.
-
-### CLI
-
-The CLI is most easily used via cargo, and can for example be used to compile a formatted pdf version of a script by running:
-
-```sh
-cargo run -- script.fountain -o script.pdf
-```
-
-More details on the CLI tool can be found by running:
-
-```sh
-cargo run -- -h
-```
-
+Please see the individual crates' README-files for information on how to use them.
 
 ## Acknowledgements
 
