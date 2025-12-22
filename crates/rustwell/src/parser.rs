@@ -258,7 +258,7 @@ impl<'a> Parser<'a> {
                         .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
                 {
                     number = Some(numbering.to_string());
-                    inner = new_inner;
+                    inner = new_inner.trim_end();
                 }
 
                 this.elements.push(Element::Heading {
@@ -532,7 +532,7 @@ mod tests {
         let correct = Screenplay::new(
             None,
             vec![Element::Heading {
-                slug: "OUTSIDE - DAY ".into(),
+                slug: "OUTSIDE - DAY".into(),
                 number: Some("S.1".to_string()),
             }],
         );
