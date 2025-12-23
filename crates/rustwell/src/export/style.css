@@ -108,28 +108,20 @@ h1,h2,h3,h4,h5{
     background-image: -webkit-linear-gradient(top, rgb(255, 255, 245), rgb(255, 255, 255));
     font-size: 11pt;
 }
-h1,.h1-synopsis {
+h1 {
     margin-left:-71pt;
 }
-h2,.h2-synopsis {
+h2 {
     margin-left:-61pt;
 }
-h3,.h3-synopsis {
+h3 {
     margin-left:-41pt;
 }
-h4,.h4-synopsis {
+h4 {
     margin-left:-21pt;
 }
-h5,.h5-synopsis {
+h5 {
     margin-left:-1pt;
-}
-.h1-synopsis,.h2-synopsis,.h3-synopsis,.h4-synopsis,.h5-synopsis,.h6-synopsis{
-    font-family:'Gill Sans','Helvetiva Neue',Helvetica,sans-serif;
-    font-size: 10pt;
-    font-style: italic;
-    color:rgb(145, 145, 145);
-    display:block;
-    margin-bottom:5pt;
 }
 h6 {
     margin-top: 2em;
@@ -189,7 +181,7 @@ div.transition {
     width: 306.67pt;
     text-transform: uppercase;
 }
-.note p {
+.synopsis p {
     padding-left: 2em;
     color:rgb(145, 145, 145);
 }

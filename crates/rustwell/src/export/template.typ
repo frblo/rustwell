@@ -163,3 +163,10 @@
 #let transition(name) = {
   align(right, block([#upper(name)], spacing: line_spacing(1), inset: (right: 2em)))
 }
+
+#let synopsis(cont) = {
+  block(
+    inset: (left: 1em, right: 1em),
+    text(fill: luma(100), cont)
+  )
+}

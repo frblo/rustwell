@@ -80,6 +80,7 @@ impl<'a> Parser<'a> {
                     // The first one returning true will break
                     if self.try_section(trimmed)
                         || self.try_page_break(trimmed)
+                        || self.try_synopsis(trimmed)
                         || self.try_forced_action(trimmed)
                         || self.try_centered(trimmed)
                         || self.try_lyrics(trimmed)
@@ -137,6 +138,27 @@ impl<'a> Parser<'a> {
             line,
             |_, s| s.trim_start().starts_with("#").then_some(s),
             |_, _| return,
+        )
+    }
+
+    fn try_synopsis(&mut self, line: &str) -> bool {
+        self.try_(
+            line,
+            |_, s| s.trim_start().strip_prefix('='),
+            |this, inner| {
+                if this.state == State::InBlock
+                    && let Some(Element::Synopsis(rs)) = this.elements.last_mut()
+                {
+                    rs.push_str("\n");
+                    rs.push_str(inner);
+                    return;
+                }
+
+                let rs = RichString::from(inner);
+                this.elements.push(Element::Synopsis(rs));
+
+                this.state = State::InBlock;
+            },
         )
     }
 
@@ -742,6 +764,19 @@ YES!
     fn parses_pagebreak_with_8_equals() {
         let input = "========";
         let correct = Screenplay::new(None, vec![Element::PageBreak]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn parses_synopsis() {
+        let input = "=In this scene everyone gets cake.";
+        let correct = Screenplay::new(
+            None,
+            vec![Element::Synopsis(
+                "In this scene everyone gets cake.".into(),
+            )],
+        );
 
         parser_tester(input, correct)
     }

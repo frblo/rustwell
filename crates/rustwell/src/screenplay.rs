@@ -41,7 +41,7 @@ pub enum Element {
     Lyrics(RichString),
     Transition(RichString),
     CenteredText(RichString),
-    Note(RichString),
+    Synopsis(RichString),
     PageBreak,
 }
 

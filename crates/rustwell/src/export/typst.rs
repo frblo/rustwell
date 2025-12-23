@@ -23,16 +23,16 @@ const TEMPLATE: &str = include_str!("template.typ");
 /// manually compiled with any [typst]-compiler. The document will not be very
 /// readable nor be provided with comments explaining anything. This is mainly included
 /// for debugging.
-pub fn export_typst(screenplay: &Screenplay, mut writer: impl Write) {
-    let content = format_as_typst(screenplay);
+pub fn export_typst(screenplay: &Screenplay, mut writer: impl Write, synopses: bool) {
+    let content = format_as_typst(screenplay, synopses);
     write!(writer, "{content}").expect("Failed to write to typst document");
 }
 
 /// Generates a [PagedDocument], which is a layouted [typst] document which can then
 /// be exported and written with any [typst] exporter, like [typst_pdf].
-pub fn compile_document(screenplay: &Screenplay) -> PagedDocument {
+pub fn compile_document(screenplay: &Screenplay, synopses: bool) -> PagedDocument {
     let (fontbook, fonts) = create_fontbook();
-    let content = format_as_typst(screenplay);
+    let content = format_as_typst(screenplay, synopses);
     let worldplay = WorldPlay::new(content, &fontbook, &fonts);
     typst::compile(&worldplay)
         .output
@@ -41,11 +41,11 @@ pub fn compile_document(screenplay: &Screenplay) -> PagedDocument {
 
 /// Formats the [Screenplay] as a [typst] document, meaning it essentially gets
 /// converted into [typst]-compilable code.
-fn format_as_typst(screenplay: &Screenplay) -> String {
+fn format_as_typst(screenplay: &Screenplay, synopses: bool) -> String {
     let formatted_elements = screenplay
         .elements
         .iter()
-        .map(export_element)
+        .map(|e| export_element(e, synopses))
         .collect::<Vec<String>>();
     let titlepage = export_titlepage(screenplay);
     format!("{TEMPLATE}\n{titlepage}\n{}", formatted_elements.join("\n"))
@@ -80,7 +80,7 @@ fn export_titlepage(screenplay: &Screenplay) -> String {
 
 /// Exports a single [Element] as [typst] code. Primarily done by calling the associated
 /// [typst] function found in the template.
-fn export_element(element: &Element) -> String {
+fn export_element(element: &Element, synopses: bool) -> String {
     match element {
         Element::Heading { slug, number } => {
             if let Some(num) = number {
@@ -112,7 +112,13 @@ fn export_element(element: &Element) -> String {
         Element::Lyrics(s) => format!("#lyrics[{}]", format_rich_string(s)),
         Element::Transition(s) => format!("#transition[{}]", format_rich_string(s)),
         Element::CenteredText(s) => format!("#centered[{}]", format_rich_string(s)),
-        Element::Note(_) => "".to_string(), // TODO: Implement when decided on what do to
+        Element::Synopsis(s) => {
+            if synopses {
+                format!("#synopsis[{}]", format_rich_string(s))
+            } else {
+                "".to_string()
+            }
+        }
         Element::PageBreak => "#pagebreak()".to_string(),
     }
 }
