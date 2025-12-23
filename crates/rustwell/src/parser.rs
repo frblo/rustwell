@@ -78,7 +78,8 @@ impl<'a> Parser<'a> {
             match self.state {
                 State::Default => {
                     // The first one returning true will break
-                    if self.try_page_break(trimmed)
+                    if self.try_section(trimmed)
+                        || self.try_page_break(trimmed)
                         || self.try_forced_action(trimmed)
                         || self.try_centered(trimmed)
                         || self.try_lyrics(trimmed)
@@ -129,6 +130,14 @@ impl<'a> Parser<'a> {
 
         handle(self, new_line);
         true
+    }
+
+    fn try_section(&mut self, line: &str) -> bool {
+        self.try_(
+            line,
+            |_, s| s.trim_start().starts_with("#").then_some(s),
+            |_, _| return,
+        )
     }
 
     fn try_page_break(&mut self, line: &str) -> bool {
@@ -733,6 +742,31 @@ YES!
     fn parses_pagebreak_with_8_equals() {
         let input = "========";
         let correct = Screenplay::new(None, vec![Element::PageBreak]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn does_not_parse_section() {
+        let input = r#"
+# Act 1
+
+INT. HOUSE
+
+## Montage
+
+House is empty."#;
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into()),
+            ],
+        );
 
         parser_tester(input, correct)
     }
