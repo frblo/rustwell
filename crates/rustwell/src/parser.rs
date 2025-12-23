@@ -748,14 +748,14 @@ YES!
 
     #[test]
     fn does_not_parse_section() {
-        let input = r#"
+        let input = r"
 # Act 1
 
 INT. HOUSE
 
 ## Montage
 
-House is empty."#;
+House is empty.";
 
         let correct = Screenplay::new(
             None,
@@ -766,6 +766,62 @@ House is empty."#;
                 },
                 Element::Action("House is empty.".into()),
             ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_boneyard() {
+        let input = r"
+INT. HOUSE
+
+/* This is a boneyard
+                and should not be parsed
+, you understand?*/
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_boneyard_inlined() {
+        let input = "The house is /*extremely full*/empty.";
+
+        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_boneyard_unended() {
+        let input = r"
+INT. HOUSE
+
+/* This is a boneyard
+                and should not be parsed
+, you understand?
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            }],
         );
 
         parser_tester(input, correct)
