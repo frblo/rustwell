@@ -30,7 +30,7 @@
 //!     let parsed = parse(script);
 //!     let mut output = BufWriter::new(stdout());
 //!
-//!     export_html(&parsed, &mut output, false);
+//!     export_html(&parsed, &mut output, false, false);
 //! }
 //! ```
 
