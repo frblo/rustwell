@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn perser_ignores_backslash() {
+    fn parser_ignores_backslash() {
         let mut rs = RichString::new();
         rs.push_str(r#"\*text\*"#);
 
