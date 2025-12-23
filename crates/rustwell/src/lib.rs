@@ -8,9 +8,11 @@
 //!
 //! # Examples
 //!
-//! ```rust
+//! ```
 //! use std::io::BufWriter;
 //! use std::io::stdout;
+//! use rustwell::rich_string::RichString;
+//! use rustwell::{export_html, parse};
 //!
 //! fn main() {
 //!     let script = r#"
@@ -25,7 +27,7 @@
 //!     Hey, open up!
 //!     "#;
 //!
-//!     let parsed = parse_str(script);
+//!     let parsed = parse(script);
 //!     let mut output = BufWriter::new(stdout());
 //!
 //!     export_html(&parsed, &mut output, false);
@@ -53,6 +55,8 @@ pub use export::export_typst;
 /// # Examples
 ///
 /// ```
+/// use rustwell::parse;
+///
 /// let input = r#"
 /// Title: Example Screenplay
 ///
