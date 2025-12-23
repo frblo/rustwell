@@ -448,36 +448,37 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Removes comments and normalizes tabs to four spaces
+/// Removes boneyards and normalizes tabs to four spaces
 fn preprocess_source(src: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    let mut in_comment = false;
+    let mut in_boneyard = false;
 
+    // Filter out boneyard and replace tabs
     while i < bytes.len() {
         let b = bytes[i];
 
-        if in_comment {
-            // Inside comment: preserve only newlines so that a comment can cover all whitespace
+        if in_boneyard {
+            // Inside boneyard: preserve only newlines so that a boneyard can cover all whitespace
             if b == b'\n' {
                 out.push(b'\n');
                 i += 1;
                 continue;
             }
 
-            // Check if at the end of comment
+            // Check if at the end of boneyard
             if i + 1 < bytes.len() && b == b'*' && bytes[i + 1] == b'/' {
-                in_comment = false;
+                in_boneyard = false;
                 i += 2;
                 continue;
             }
 
             i += 1;
         } else {
-            // Check if at the start of a comment
+            // Check if at the start of a boneyard
             if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
-                in_comment = true;
+                in_boneyard = true;
                 i += 2;
                 continue;
             }
@@ -495,7 +496,71 @@ fn preprocess_source(src: &str) -> String {
         }
     }
 
-    String::from_utf8(out).expect("Valid UTF-8 after preprocessing")
+    // Filter out comments
+    let mut final_out = Vec::with_capacity(out.len());
+    i = 0;
+    let mut in_comment = false;
+    let mut comment_buffer = Vec::new();
+
+    while i < out.len() {
+        let b = out[i];
+
+        if in_comment {
+            // Inside comment: preserve only newlines so that a comment can cover all whitespace
+            if b == b'\n' {
+                // Allowed newline in comment: "[[\n  \n]]"
+                if i + 3 < out.len()
+                    && out[i + 1] == b' '
+                    && out[i + 2] == b' '
+                    && out[i + 3] == b'\n'
+                {
+                    comment_buffer.push(b'\n');
+                    comment_buffer.push(b' ');
+                    comment_buffer.push(b' ');
+                    comment_buffer.push(b'\n');
+                    i += 4;
+                    continue;
+                }
+                // Exit comment without closing it
+                if i + 1 < out.len() && out[i + 1] == b'\n' {
+                    final_out.append(&mut comment_buffer);
+                    final_out.push(b'\n');
+                    final_out.push(b'\n');
+                    i += 2;
+                    continue;
+                }
+                comment_buffer.push(b'\n');
+                i += 1;
+                continue;
+            }
+
+            // Check if at the end of comment
+            if i + 1 < out.len() && b == b']' && out[i + 1] == b']' {
+                in_comment = false;
+                comment_buffer = Vec::new();
+                i += 2;
+                continue;
+            }
+
+            comment_buffer.push(b);
+            i += 1;
+        } else {
+            // Check if at the start of a comment
+            if i + 1 < out.len() && b == b'[' && out[i + 1] == b'[' {
+                in_comment = true;
+                comment_buffer = vec![b'[', b'['];
+                i += 2;
+                continue;
+            }
+
+            // Normal character
+            final_out.push(b);
+            i += 1;
+        }
+    }
+    final_out.append(&mut comment_buffer);
+
+    String::from_utf8(final_out).expect("Valid UTF-8 after preprocessing")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -858,6 +923,120 @@ House is empty.";
                 number: None,
             }],
         );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_comment_multiline() {
+        let input = r"
+INT. HOUSE
+
+[[ This is a comment
+                and should not be parsed
+, you understand?]]
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_comment_inlined() {
+        let input = "The house is [[should it be full?]]empty.";
+
+        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_comment_inlined_multiline() {
+        let input = r"
+INT. HOUSE
+
+The house [[ This is a comment
+                and should not be parsed
+, you understand?]]is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_comment_multiline_empty_newline() {
+        let input = r"
+INT. HOUSE
+
+The house [[This is a comment
+  
+                and should not be parsed
+, you understand?]]is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn not_filters_out_unended_comment_multiline() {
+        let input = r"
+INT. HOUSE
+
+The house [[wow
+
+no";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house [[wow".into()),
+                Element::Action("no".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn not_filters_out_unended_comment() {
+        let input = "This is [[ not right";
+
+        let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
 
         parser_tester(input, correct)
     }
