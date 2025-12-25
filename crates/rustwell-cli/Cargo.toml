@@ -3,6 +3,10 @@ name = "rustwell-cli"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "A CLI tool for parsing and compiling fountain screenplay scripts."
+repository = "https://github.com/frblo/rustwell"
+keywords = ["fountain", "screenplay", "stageplay"]
+categories  = ["command-line-interface", "command-line-utilities"]
 
 [[bin]]
 name = "rustwell-cli"

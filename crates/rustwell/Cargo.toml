@@ -3,11 +3,15 @@ name = "rustwell"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "A library for parsing and compiling fountain screenplay scripts."
+repository = "https://github.com/frblo/rustwell"
+keywords = ["fountain", "screenplay", "stageplay"]
+categories = ["command-line-interface"]
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
 bitflags = "2"
-typst = "0.14.0"
-typst-pdf = "0.14.0"
+typst = "0.14.2"
+typst-pdf = "0.14.2"
