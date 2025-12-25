@@ -10,6 +10,10 @@ This repository contains both the Rustwell library, and the Rustwell-CLI tool as
 
 Please see the individual crates' README-files for information on how to use them.
 
+## Features
+
+Rustwell currently implements the entirely of the *Fountain* specification. It offers a blazing fast *Fountain* parser, and currently supports *PDF* and *HTML* exports natively.
+
 ## Acknowledgements
 
 The original CSS code for the html output was created by [Jonathan Poritsky](https://www.candlerblog.com/), but has been expanded upon for this endeavour.
