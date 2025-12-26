@@ -9,7 +9,7 @@ keywords = ["fountain", "screenplay", "stageplay"]
 categories  = ["command-line-interface", "command-line-utilities"]
 
 [[bin]]
-name = "rustwell-cli"
+name = "rustwell"
 path = "src/main.rs"
 
 [dependencies]
