@@ -42,7 +42,7 @@ use bitflags::bitflags;
 /// assert_eq!(rs.elements[1].text, "world!".to_string());
 /// assert!(rs.elements[1].is_bold());
 /// ```
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct RichString {
     pub elements: Vec<Element>,
 }
@@ -156,7 +156,7 @@ where
 
 /// A [RichString] component, containing a [String] and the style attributes
 /// belonging to said string.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Default, Hash)]
 pub struct Element {
     pub text: String,
     attributes: Attributes,
@@ -190,7 +190,7 @@ impl Element {
 
 bitflags! {
     /// A bit array keeping track of style attributes for a [RichString].
-    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Default)]
     struct Attributes: u8 {
         const BOLD      = 0b001;
         const UNDERLINE = 0b010;

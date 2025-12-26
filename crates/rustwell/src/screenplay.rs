@@ -7,7 +7,7 @@ use crate::rich_string::RichString;
 /// information for the title page of the screenplay.
 ///
 /// Contains both a [`Option<TitlePage>`] and a [`Vec<Element>`], which are the screenplay components.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Default)]
 pub struct Screenplay {
     pub titlepage: Option<TitlePage>,
     pub elements: Vec<Element>,
@@ -29,7 +29,7 @@ impl Screenplay {
 }
 
 /// The components of a [Screenplay], like scene headings, action, dialogue, etc.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Element {
     Heading {
         slug: RichString,
@@ -51,7 +51,7 @@ pub enum Element {
 /// NAME (extension)
 /// (parenthetical)
 /// Line.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Dialogue {
     pub character: RichString,
     pub extension: Option<RichString>,
@@ -75,7 +75,7 @@ impl Default for Dialogue {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum DialogueElement {
     Parenthetical(RichString),
     Line(RichString),
@@ -83,7 +83,7 @@ pub enum DialogueElement {
 
 /// The information for a title page. Each field may be empty as none are strictly required
 /// according to the fountain specification.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct TitlePage {
     pub title: Vec<RichString>,
     pub credit: Vec<RichString>,
