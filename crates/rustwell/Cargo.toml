@@ -6,7 +6,7 @@ license = "MIT"
 description = "A library for parsing and compiling fountain screenplay scripts."
 repository = "https://github.com/frblo/rustwell"
 keywords = ["fountain", "screenplay", "stageplay"]
-categories = ["command-line-interface"]
+categories = ["command-line-interface", "parser-implementations"]
 
 [lib]
 path = "src/lib.rs"
