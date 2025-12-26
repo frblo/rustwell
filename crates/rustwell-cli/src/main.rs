@@ -27,6 +27,10 @@ struct Cli {
     /// Alias for stdout (same as `-o -`)
     #[arg(long = "stdout")]
     stdout: bool,
+
+    /// Include synopses in output document
+    #[arg(short = 's', long = "synopses", default_value_t = false)]
+    synopses: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -49,9 +53,9 @@ fn main() -> Result<()> {
 
     let screenplay = rustwell::parse(&buf);
     match target {
-        Target::Html => rustwell::export_html(&screenplay, &mut writer, true),
-        Target::Pdf => rustwell::export_pdf(&screenplay, &mut writer),
-        Target::Typst => rustwell::export_typst(&screenplay, &mut writer),
+        Target::Html => rustwell::export_html(&screenplay, &mut writer, true, cli.synopses),
+        Target::Pdf => rustwell::export_pdf(&screenplay, &mut writer, cli.synopses),
+        Target::Typst => rustwell::export_typst(&screenplay, &mut writer, cli.synopses),
     }
 
     Ok(())

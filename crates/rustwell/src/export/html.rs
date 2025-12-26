@@ -11,7 +11,7 @@ const CSS: &str = include_str!("style.css");
 /// Exports the [Screenplay] in `html`-format to the given writer.
 /// The function allows the caller to choose to include the default `css`
 /// styling as part of the outputed file.
-pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
+pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool, synopses: bool) {
     writeln!(
         &mut writer,
         r#"<!DOCTYPE html>
@@ -34,7 +34,8 @@ pub fn export_html(screenplay: &Screenplay, mut writer: impl Write, css: bool) {
             .expect("Failed to write to output");
     }
     for e in &screenplay.elements {
-        writeln!(&mut writer, "{}", export_element(e)).expect("Failed to write to output");
+        writeln!(&mut writer, "{}", export_element(e, synopses))
+            .expect("Failed to write to output");
     }
     writeln!(
         &mut writer,
@@ -85,7 +86,7 @@ fn export_titlepage_element(value: &str, element: &[RichString]) -> String {
 }
 
 /// Formats an [Element] into a `html`-[String].
-fn export_element(element: &Element) -> String {
+fn export_element(element: &Element, synopses: bool) -> String {
     match element {
         Element::Heading { slug, number } => {
             format!(
@@ -139,10 +140,16 @@ fn export_element(element: &Element) -> String {
             r#"<div class="action centered"><p>{}</p></div>"#,
             format_rich_string(s)
         ),
-        Element::Note(s) => format!(
-            r#"<div class="note"><p>{}</p></div>"#,
-            format_rich_string(s)
-        ),
+        Element::Synopsis(s) => {
+            if synopses {
+                format!(
+                    r#"<div class="synopsis"><p>{}</p></div>"#,
+                    format_rich_string(s)
+                )
+            } else {
+                "".to_string()
+            }
+        }
         Element::PageBreak => "".to_string(), // No pagebreaks in html
     }
 }

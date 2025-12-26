@@ -10,7 +10,7 @@ use std::str::Lines;
 /// Parses a Fountain source string into a [`Screenplay`] structure.
 ///
 /// Preprocesses the source text by removing
-/// comments and normalizing tabs to spaces.
+/// boneyards, notes and normalizing tabs to spaces.
 ///
 /// # Examples
 ///
@@ -78,7 +78,9 @@ impl<'a> Parser<'a> {
             match self.state {
                 State::Default => {
                     // The first one returning true will break
-                    if self.try_page_break(trimmed)
+                    if self.try_section(trimmed)
+                        || self.try_page_break(trimmed)
+                        || self.try_synopsis(trimmed)
                         || self.try_forced_action(trimmed)
                         || self.try_centered(trimmed)
                         || self.try_lyrics(trimmed)
@@ -129,6 +131,35 @@ impl<'a> Parser<'a> {
 
         handle(self, new_line);
         true
+    }
+
+    fn try_section(&mut self, line: &str) -> bool {
+        self.try_(
+            line,
+            |_, s| s.trim_start().starts_with("#").then_some(s),
+            |_, _| return,
+        )
+    }
+
+    fn try_synopsis(&mut self, line: &str) -> bool {
+        self.try_(
+            line,
+            |_, s| s.trim_start().strip_prefix('='),
+            |this, inner| {
+                if this.state == State::InBlock
+                    && let Some(Element::Synopsis(rs)) = this.elements.last_mut()
+                {
+                    rs.push_str("\n");
+                    rs.push_str(inner);
+                    return;
+                }
+
+                let rs = RichString::from(inner);
+                this.elements.push(Element::Synopsis(rs));
+
+                this.state = State::InBlock;
+            },
+        )
     }
 
     fn try_page_break(&mut self, line: &str) -> bool {
@@ -417,36 +448,37 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Removes comments and normalizes tabs to four spaces
+/// Removes boneyards, notes and normalizes tabs to four spaces
 fn preprocess_source(src: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
-    let mut in_comment = false;
+    let mut in_boneyard = false;
 
+    // Filter out boneyard and replace tabs
     while i < bytes.len() {
         let b = bytes[i];
 
-        if in_comment {
-            // Inside comment: preserve only newlines so that a comment can cover all whitespace
+        if in_boneyard {
+            // Inside boneyard: preserve only newlines so that a boneyard can cover all whitespace
             if b == b'\n' {
                 out.push(b'\n');
                 i += 1;
                 continue;
             }
 
-            // Check if at the end of comment
+            // Check if at the end of boneyard
             if i + 1 < bytes.len() && b == b'*' && bytes[i + 1] == b'/' {
-                in_comment = false;
+                in_boneyard = false;
                 i += 2;
                 continue;
             }
 
             i += 1;
         } else {
-            // Check if at the start of a comment
+            // Check if at the start of a boneyard
             if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
-                in_comment = true;
+                in_boneyard = true;
                 i += 2;
                 continue;
             }
@@ -464,7 +496,71 @@ fn preprocess_source(src: &str) -> String {
         }
     }
 
-    String::from_utf8(out).expect("Valid UTF-8 after preprocessing")
+    // Filter out notes
+    let mut final_out = Vec::with_capacity(out.len());
+    i = 0;
+    let mut in_note = false;
+    let mut note_buffer = Vec::new();
+
+    while i < out.len() {
+        let b = out[i];
+
+        if in_note {
+            // Inside note: preserve only newlines so that a note can cover all whitespace
+            if b == b'\n' {
+                // Allowed newline in note: "[[\n  \n]]"
+                if i + 3 < out.len()
+                    && out[i + 1] == b' '
+                    && out[i + 2] == b' '
+                    && out[i + 3] == b'\n'
+                {
+                    note_buffer.push(b'\n');
+                    note_buffer.push(b' ');
+                    note_buffer.push(b' ');
+                    note_buffer.push(b'\n');
+                    i += 4;
+                    continue;
+                }
+                // Exit note without closing it
+                if i + 1 < out.len() && out[i + 1] == b'\n' {
+                    final_out.append(&mut note_buffer);
+                    final_out.push(b'\n');
+                    final_out.push(b'\n');
+                    i += 2;
+                    continue;
+                }
+                note_buffer.push(b'\n');
+                i += 1;
+                continue;
+            }
+
+            // Check if at the end of note
+            if i + 1 < out.len() && b == b']' && out[i + 1] == b']' {
+                in_note = false;
+                note_buffer = Vec::new();
+                i += 2;
+                continue;
+            }
+
+            note_buffer.push(b);
+            i += 1;
+        } else {
+            // Check if at the start of a note
+            if i + 1 < out.len() && b == b'[' && out[i + 1] == b'[' {
+                in_note = true;
+                note_buffer = vec![b'[', b'['];
+                i += 2;
+                continue;
+            }
+
+            // Normal character
+            final_out.push(b);
+            i += 1;
+        }
+    }
+    final_out.append(&mut note_buffer);
+
+    String::from_utf8(final_out).expect("Valid UTF-8 after preprocessing")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -733,6 +829,214 @@ YES!
     fn parses_pagebreak_with_8_equals() {
         let input = "========";
         let correct = Screenplay::new(None, vec![Element::PageBreak]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn parses_synopsis() {
+        let input = "=In this scene everyone gets cake.";
+        let correct = Screenplay::new(
+            None,
+            vec![Element::Synopsis(
+                "In this scene everyone gets cake.".into(),
+            )],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn does_not_parse_section() {
+        let input = r"
+# Act 1
+
+INT. HOUSE
+
+## Montage
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_boneyard() {
+        let input = r"
+INT. HOUSE
+
+/* This is a boneyard
+                and should not be parsed
+, you understand?*/
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_boneyard_inlined() {
+        let input = "The house is /*extremely full*/empty.";
+
+        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_boneyard_unended() {
+        let input = r"
+INT. HOUSE
+
+/* This is a boneyard
+                and should not be parsed
+, you understand?
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            }],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_note_multiline() {
+        let input = r"
+INT. HOUSE
+
+[[ This is a note
+                and should not be parsed
+, you understand?]]
+
+House is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_note_inlined() {
+        let input = "The house is [[should it be full?]]empty.";
+
+        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_note_inlined_multiline() {
+        let input = r"
+INT. HOUSE
+
+The house [[ This is a note
+                and should not be parsed
+, you understand?]]is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn filters_out_note_multiline_empty_newline() {
+        let input = r"
+INT. HOUSE
+
+The house [[This is a note
+  
+                and should not be parsed
+, you understand?]]is empty.";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house is empty.".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn not_filters_out_unended_note_multiline() {
+        let input = r"
+INT. HOUSE
+
+The house [[wow
+
+no";
+
+        let correct = Screenplay::new(
+            None,
+            vec![
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house [[wow".into()),
+                Element::Action("no".into()),
+            ],
+        );
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
+    fn not_filters_out_unended_note() {
+        let input = "This is [[ not right";
+
+        let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
 
         parser_tester(input, correct)
     }
