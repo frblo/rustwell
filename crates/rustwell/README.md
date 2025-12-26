@@ -10,7 +10,7 @@ Add this dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rustwell = "0.1"
+rustwell = "0.1.0"
 ```
 
 and then start using the library. Please read the documentation for more details on how to use the library.
