@@ -137,7 +137,7 @@ impl<'a> Parser<'a> {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with("#").then_some(s),
-            |_, _| return,
+            |_, _| {},
         )
     }
 

@@ -1,13 +1,17 @@
 use clap::{Parser, ValueEnum};
 use color_eyre::Result;
 use color_eyre::eyre::bail;
+use rustwell::Exporter;
+use rustwell::ExporterExt;
+use rustwell::HtmlExporter;
+use rustwell::PdfExporter;
+use rustwell::Screenplay;
+use rustwell::TypstExporter;
 
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
-use std::io::BufWriter;
 use std::io::Read;
-use std::io::Write;
 use std::path::Path;
 
 #[derive(Debug, Parser)]
@@ -44,19 +48,11 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
 
+    let exporter = decide_exporter(&cli);
     let mut reader = decide_reader(&cli)?;
-    let target = decide_target(&cli);
-    let mut writer = decide_writer(&cli, &target)?;
 
-    let mut buf = String::new();
-    reader.read_to_string(&mut buf)?;
-
-    let screenplay = rustwell::parse(&buf);
-    match target {
-        Target::Html => rustwell::export_html(&screenplay, &mut writer, true, cli.synopses),
-        Target::Pdf => rustwell::export_pdf(&screenplay, &mut writer, cli.synopses),
-        Target::Typst => rustwell::export_typst(&screenplay, &mut writer, cli.synopses),
-    }
+    let screenplay = rustwell::parse_reader(&mut reader)?;
+    export(&cli, &screenplay, exporter)?;
 
     Ok(())
 }
@@ -67,6 +63,25 @@ fn decide_reader(cli: &Cli) -> Result<Box<dyn Read>> {
     } else {
         let file = File::open(&cli.src)?;
         Ok(Box::new(BufReader::new(file)))
+    }
+}
+
+fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
+    let target = decide_target(cli);
+    match target {
+        Target::Html => Box::new(HtmlExporter {
+            css: true,
+            synopses: cli.synopses,
+            ..Default::default()
+        }),
+        Target::Pdf => Box::new(PdfExporter {
+            synopses: cli.synopses,
+            ..Default::default()
+        }),
+        Target::Typst => Box::new(TypstExporter {
+            synopses: cli.synopses,
+            ..Default::default()
+        }),
     }
 }
 
@@ -105,17 +120,15 @@ fn detect_target_from_path(path: &str) -> Result<Target> {
     Ok(t)
 }
 
-fn decide_writer(cli: &Cli, target: &Target) -> Result<Box<dyn Write>> {
+fn export(cli: &Cli, screenplay: &Screenplay, exporter: Box<dyn Exporter>) -> Result<()> {
     if cli.stdout || cli.out.as_deref().unwrap_or_default() == "-" {
-        Ok(Box::new(BufWriter::new(io::stdout())))
+        Ok(exporter.export_to_stdout(screenplay)?)
     } else if let Some(path) = cli.out.as_deref() {
-        let f = File::create(path)?;
-        Ok(Box::new(BufWriter::new(f)))
+        Ok(exporter.export_to_file(screenplay, path)?)
     } else {
-        let path = Path::new(detect_name_from_path(&cli.src)?)
-            .with_extension(extension_from_target(target));
-        let f = File::create(path)?;
-        Ok(Box::new(BufWriter::new(f)))
+        let dir = Path::new("");
+        let base = detect_name_from_path(&cli.src)?;
+        Ok(exporter.export_with_extension(screenplay, dir, base)?)
     }
 }
 
@@ -128,12 +141,4 @@ fn detect_name_from_path(path: &str) -> Result<&str> {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or_default())
-}
-
-fn extension_from_target(target: &Target) -> &'static str {
-    match target {
-        Target::Typst => "typ",
-        Target::Html => "html",
-        Target::Pdf => "pdf",
-    }
 }

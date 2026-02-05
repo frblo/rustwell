@@ -11,6 +11,7 @@ use typst::{
 };
 
 use crate::{
+    Exporter,
     rich_string::{self, RichString},
     screenplay::{DialogueElement, Element, Screenplay},
 };
@@ -19,51 +20,74 @@ use crate::{
 /// export module.
 const TEMPLATE: &str = include_str!("template.typ");
 
-/// Exports the provided [Screenplay] as a pure [typst] document that can be
-/// manually compiled with any [typst]-compiler. The document will not be very
-/// readable nor be provided with comments explaining anything. This is mainly included
-/// for debugging.
-pub fn export_typst(screenplay: &Screenplay, mut writer: impl Write, synopses: bool) {
-    let content = format_as_typst(screenplay, synopses);
-    write!(writer, "{content}").expect("Failed to write to typst document");
+#[derive(Default)]
+pub struct TypstExporter {
+    pub synopses: bool,
 }
 
-/// Generates a [PagedDocument], which is a layouted [typst] document which can then
-/// be exported and written with any [typst] exporter, like [typst_pdf].
-pub fn compile_document(screenplay: &Screenplay, synopses: bool) -> PagedDocument {
-    let (fontbook, fonts) = create_fontbook();
-    let content = format_as_typst(screenplay, synopses);
-    let worldplay = WorldPlay::new(content, &fontbook, &fonts);
-    typst::compile(&worldplay)
-        .output
-        .expect("Error compiling typst document")
+impl Exporter for TypstExporter {
+    fn file_extension(&self) -> &'static str {
+        "typ"
+    }
+
+    /// Exports typst source code
+    fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
+        self.export_typst(screenplay, writer)
+    }
 }
 
-/// Formats the [Screenplay] as a [typst] document, meaning it essentially gets
-/// converted into [typst]-compilable code.
-fn format_as_typst(screenplay: &Screenplay, synopses: bool) -> String {
-    let formatted_elements = screenplay
-        .elements
-        .iter()
-        .map(|e| export_element(e, synopses))
-        .collect::<Vec<String>>();
-    let titlepage = export_titlepage(screenplay);
-    format!("{TEMPLATE}\n{titlepage}\n{}", formatted_elements.join("\n"))
-}
+impl TypstExporter {
+    /// Exports the provided [Screenplay] as a pure [typst] document that can be
+    /// manually compiled with any [typst]-compiler. The document will not be very
+    /// readable nor be provided with comments explaining anything. This is mainly included
+    /// for debugging.
+    pub fn export_typst(
+        &self,
+        screenplay: &Screenplay,
+        mut writer: impl Write,
+    ) -> std::io::Result<()> {
+        let content = self.format_as_typst(screenplay);
+        write!(writer, "{content}")
+    }
 
-/// Exports the [crate::screenplay::TitlePage] in the provided [Screenplay] to [typst] code.
-/// This function also provides the necessary `#show: screenplay.with(...)` that
-/// handles the page layout for the whole screenplay.
-fn export_titlepage(screenplay: &Screenplay) -> String {
-    if let Some(titlepage) = &screenplay.titlepage {
-        let title = format_titlepage_element(&titlepage.title);
-        let credit = format_titlepage_element(&titlepage.credit);
-        let authors = format_titlepage_element(&titlepage.authors);
-        let source = format_titlepage_element(&titlepage.source);
-        let draft_date = format_titlepage_element(&titlepage.draft_date);
-        let contact = format_titlepage_element(&titlepage.contact);
-        format!(
-            r#"#show: screenplay.with(
+    /// Generates a [PagedDocument], which is a layouted [typst] document which can then
+    /// be exported and written with any [typst] exporter, like [typst_pdf].
+    pub fn compile_document(&self, screenplay: &Screenplay) -> std::io::Result<PagedDocument> {
+        let (fontbook, fonts) = create_fontbook();
+        let content = self.format_as_typst(screenplay);
+        let worldplay = WorldPlay::new(content, &fontbook, &fonts);
+        let pd: Result<PagedDocument, _> = typst::compile(&worldplay).output;
+        match pd {
+            Ok(p) => Ok(p),
+            Err(_) => Err(std::io::Error::other("failed to compile typst document")),
+        }
+    }
+
+    /// Formats the [Screenplay] as a [typst] document, meaning it essentially gets
+    /// converted into [typst]-compilable code.
+    fn format_as_typst(&self, screenplay: &Screenplay) -> String {
+        let formatted_elements = screenplay
+            .elements
+            .iter()
+            .map(|e| self.export_element(e))
+            .collect::<Vec<String>>();
+        let titlepage = self.export_titlepage(screenplay);
+        format!("{TEMPLATE}\n{titlepage}\n{}", formatted_elements.join("\n"))
+    }
+
+    /// Exports the [crate::screenplay::TitlePage] in the provided [Screenplay] to [typst] code.
+    /// This function also provides the necessary `#show: screenplay.with(...)` that
+    /// handles the page layout for the whole screenplay.
+    fn export_titlepage(&self, screenplay: &Screenplay) -> String {
+        if let Some(titlepage) = &screenplay.titlepage {
+            let title = self.format_titlepage_element(&titlepage.title);
+            let credit = self.format_titlepage_element(&titlepage.credit);
+            let authors = self.format_titlepage_element(&titlepage.authors);
+            let source = self.format_titlepage_element(&titlepage.source);
+            let draft_date = self.format_titlepage_element(&titlepage.draft_date);
+            let contact = self.format_titlepage_element(&titlepage.contact);
+            format!(
+                r#"#show: screenplay.with(
   titlepage: true,
   title: {title},
   credit: {credit},
@@ -72,149 +96,150 @@ fn export_titlepage(screenplay: &Screenplay) -> String {
   draft_date: {draft_date},
   contact: {contact},
 )"#
-        )
-    } else {
-        "#show: screenplay.with(titlepage: false)".to_string()
-    }
-}
-
-/// Exports a single [Element] as [typst] code. Primarily done by calling the associated
-/// [typst] function found in the template.
-fn export_element(element: &Element, synopses: bool) -> String {
-    match element {
-        Element::Heading { slug, number } => {
-            if let Some(num) = number {
-                format!(
-                    r#"#scene(number: "{}")[{}]"#,
-                    replace_escaping(num),
-                    format_rich_string(slug)
-                )
-            } else {
-                format!("#scene[{}]", format_rich_string(slug))
-            }
-        }
-        Element::Action(s) => format_rich_string(s),
-        Element::Dialogue(dialogue) => format!(
-            "#dialogue(paren: {})[{}][{}]",
-            format_character_extension(&dialogue.extension),
-            format_rich_string(&dialogue.character),
-            format_dialogue(&dialogue.elements),
-        ),
-        Element::DualDialogue(dialogue1, dialogue2) => format!(
-            "#dual_dialogue(paren1: {}, paren2: {})[{}][{}][{}][{}]",
-            format_character_extension(&dialogue1.extension),
-            format_character_extension(&dialogue2.extension),
-            format_rich_string(&dialogue1.character),
-            format_dialogue(&dialogue1.elements),
-            format_rich_string(&dialogue2.character),
-            format_dialogue(&dialogue2.elements),
-        ),
-        Element::Lyrics(s) => format!("#lyrics[{}]", format_rich_string(s)),
-        Element::Transition(s) => format!("#transition[{}]", format_rich_string(s)),
-        Element::CenteredText(s) => format!("#centered[{}]", format_rich_string(s)),
-        Element::Synopsis(s) => {
-            if synopses {
-                format!("#synopsis[{}]", format_rich_string(s))
-            } else {
-                "".to_string()
-            }
-        }
-        Element::PageBreak => "#pagebreak()".to_string(),
-    }
-}
-
-/// Formats the dialogue into [typst] code.
-fn format_dialogue(dialogue: &[DialogueElement]) -> String {
-    dialogue
-        .iter()
-        .map(format_dialogue_element)
-        .collect::<Vec<String>>()
-        .join(" ")
-}
-
-/// Formats the character extension (`(V.O)`, for example) that is
-/// next to a character's name in a dialogue.
-fn format_character_extension(opt_ext: &Option<RichString>) -> String {
-    if let Some(ext) = opt_ext {
-        format!("[{}]", format_rich_string(ext))
-    } else {
-        "none".to_string()
-    }
-}
-
-/// Formats a [DialogueElement] into a [typst] code.
-fn format_dialogue_element(element: &DialogueElement) -> String {
-    match element {
-        DialogueElement::Parenthetical(s) => {
-            format!("#parenthetical[{}]", format_rich_string(s))
-        }
-        DialogueElement::Line(s) => format_rich_string(s),
-    }
-}
-
-/// Formats a [RichString] into a [typst]-[String].
-fn format_rich_string(str: &RichString) -> String {
-    str.elements
-        .iter()
-        .map(format_rich_element)
-        .collect::<Vec<String>>()
-        .concat()
-}
-
-/// Formats a [RichString] [rich_string::Element] into a [typst]-[String].
-/// All elements will be explicitly contained in a `#text("{element.text}")`
-/// function from [typst], with styling using `weight: "bold"`, `style: "italic"`
-/// and `#underline[#text(...)]`.
-///
-/// This function also iterates over each string twice to replace all escaping
-/// characters `\` and `"` with `\\` and `\*` respectively.
-fn format_rich_element(element: &rich_string::Element) -> String {
-    // Assumes newlines '\n' will only occur sole elements
-    if element.text == "\n" {
-        return "\\ ".to_string();
-    }
-
-    let mut out = format!(
-        "#text({}{}\"{}\")",
-        if element.is_bold() {
-            "weight: \"bold\","
+            )
         } else {
-            ""
-        },
-        if element.is_italic() {
-            "style: \"italic\","
-        } else {
-            ""
-        },
-        replace_escaping(&element.text)
-    );
-    if element.is_underline() {
-        out = format!("#underline[{}]", out);
+            "#show: screenplay.with(titlepage: false)".to_string()
+        }
     }
 
-    out
-}
-
-/// This function also iterates over each string twice to replace all escaping
-/// characters `\` and `"` with `\\` and `\*` respectively.
-fn replace_escaping(s: &str) -> String {
-    s.replace("\\", "\\\\").replace("\"", "\\\"")
-}
-
-/// Formats a single [crate::screenplay::TitlePage] element into [typst] code.
-/// If no value has been declared it will return `"none"`.
-fn format_titlepage_element(element: &[RichString]) -> String {
-    if element.is_empty() {
-        return "none".to_string();
+    /// Exports a single [Element] as [typst] code. Primarily done by calling the associated
+    /// [typst] function found in the template.
+    fn export_element(&self, element: &Element) -> String {
+        match element {
+            Element::Heading { slug, number } => {
+                if let Some(num) = number {
+                    format!(
+                        r#"#scene(number: "{}")[{}]"#,
+                        self.replace_escaping(num),
+                        self.format_rich_string(slug)
+                    )
+                } else {
+                    format!("#scene[{}]", self.format_rich_string(slug))
+                }
+            }
+            Element::Action(s) => self.format_rich_string(s),
+            Element::Dialogue(dialogue) => format!(
+                "#dialogue(paren: {})[{}][{}]",
+                self.format_character_extension(&dialogue.extension),
+                self.format_rich_string(&dialogue.character),
+                self.format_dialogue(&dialogue.elements),
+            ),
+            Element::DualDialogue(dialogue1, dialogue2) => format!(
+                "#dual_dialogue(paren1: {}, paren2: {})[{}][{}][{}][{}]",
+                self.format_character_extension(&dialogue1.extension),
+                self.format_character_extension(&dialogue2.extension),
+                self.format_rich_string(&dialogue1.character),
+                self.format_dialogue(&dialogue1.elements),
+                self.format_rich_string(&dialogue2.character),
+                self.format_dialogue(&dialogue2.elements),
+            ),
+            Element::Lyrics(s) => format!("#lyrics[{}]", self.format_rich_string(s)),
+            Element::Transition(s) => format!("#transition[{}]", self.format_rich_string(s)),
+            Element::CenteredText(s) => format!("#centered[{}]", self.format_rich_string(s)),
+            Element::Synopsis(s) => {
+                if self.synopses {
+                    format!("#synopsis[{}]", self.format_rich_string(s))
+                } else {
+                    "".to_string()
+                }
+            }
+            Element::PageBreak => "#pagebreak()".to_string(),
+        }
     }
-    format!(
-        "[{}]",
-        element
+
+    /// Formats the dialogue into [typst] code.
+    fn format_dialogue(&self, dialogue: &[DialogueElement]) -> String {
+        dialogue
             .iter()
-            .map(format_rich_string)
+            .map(|d| self.format_dialogue_element(d))
             .collect::<Vec<String>>()
-            .join("\\ ")
-    )
+            .join(" ")
+    }
+
+    /// Formats the character extension (`(V.O)`, for example) that is
+    /// next to a character's name in a dialogue.
+    fn format_character_extension(&self, opt_ext: &Option<RichString>) -> String {
+        if let Some(ext) = opt_ext {
+            format!("[{}]", self.format_rich_string(ext))
+        } else {
+            "none".to_string()
+        }
+    }
+
+    /// Formats a [DialogueElement] into a [typst] code.
+    fn format_dialogue_element(&self, element: &DialogueElement) -> String {
+        match element {
+            DialogueElement::Parenthetical(s) => {
+                format!("#parenthetical[{}]", self.format_rich_string(s))
+            }
+            DialogueElement::Line(s) => self.format_rich_string(s),
+        }
+    }
+
+    /// Formats a [RichString] into a [typst]-[String].
+    fn format_rich_string(&self, str: &RichString) -> String {
+        str.elements
+            .iter()
+            .map(|e| self.format_rich_element(e))
+            .collect::<Vec<String>>()
+            .concat()
+    }
+
+    /// Formats a [RichString] [rich_string::Element] into a [typst]-[String].
+    /// All elements will be explicitly contained in a `#text("{element.text}")`
+    /// function from [typst], with styling using `weight: "bold"`, `style: "italic"`
+    /// and `#underline[#text(...)]`.
+    ///
+    /// This function also iterates over each string twice to replace all escaping
+    /// characters `\` and `"` with `\\` and `\*` respectively.
+    fn format_rich_element(&self, element: &rich_string::Element) -> String {
+        // Assumes newlines '\n' will only occur sole elements
+        if element.text == "\n" {
+            return "\\ ".to_string();
+        }
+
+        let mut out = format!(
+            "#text({}{}\"{}\")",
+            if element.is_bold() {
+                "weight: \"bold\","
+            } else {
+                ""
+            },
+            if element.is_italic() {
+                "style: \"italic\","
+            } else {
+                ""
+            },
+            self.replace_escaping(&element.text)
+        );
+        if element.is_underline() {
+            out = format!("#underline[{}]", out);
+        }
+
+        out
+    }
+
+    /// This function also iterates over each string twice to replace all escaping
+    /// characters `\` and `"` with `\\` and `\*` respectively.
+    fn replace_escaping(&self, s: &str) -> String {
+        s.replace("\\", "\\\\").replace("\"", "\\\"")
+    }
+
+    /// Formats a single [crate::screenplay::TitlePage] element into [typst] code.
+    /// If no value has been declared it will return `"none"`.
+    fn format_titlepage_element(&self, element: &[RichString]) -> String {
+        if element.is_empty() {
+            return "none".to_string();
+        }
+        format!(
+            "[{}]",
+            element
+                .iter()
+                .map(|e| self.format_rich_string(e))
+                .collect::<Vec<String>>()
+                .join("\\ ")
+        )
+    }
 }
 
 /// Internal [typst::World] which is basically the whole underlying structure of the [typst]
