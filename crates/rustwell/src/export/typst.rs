@@ -20,8 +20,15 @@ use crate::{
 /// export module.
 const TEMPLATE: &str = include_str!("template.typ");
 
+/// A [`Screenplay`] exporter for `typst`
+///
+/// The [`Exporter`] implementation for [`Exporter::export`] exports [`typst`]
+/// source code.
+///
+/// The variables configure the exporter
 #[derive(Default)]
 pub struct TypstExporter {
+    /// If synopses should be included in the output
     pub synopses: bool,
 }
 
@@ -30,7 +37,7 @@ impl Exporter for TypstExporter {
         "typ"
     }
 
-    /// Exports typst source code
+    /// Exports [`typst`] source code
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
         self.export_typst(screenplay, writer)
     }

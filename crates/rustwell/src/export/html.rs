@@ -9,9 +9,14 @@ use crate::{
 /// Contents of the `style.css` file with all css rules for the `html` output.
 const CSS: &str = include_str!("style.css");
 
+/// A [`Screenplay`] exporter for `HTML`
+///
+/// The variables configure the exporter
 #[derive(Default)]
 pub struct HtmlExporter {
+    /// If `css` styling should be included in the output
     pub css: bool,
+    /// If synopses should be included in the output
     pub synopses: bool,
 }
 

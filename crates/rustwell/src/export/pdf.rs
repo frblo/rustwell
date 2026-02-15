@@ -4,8 +4,15 @@ use typst_pdf::PdfOptions;
 
 use crate::{Exporter, export::typst::TypstExporter, screenplay::Screenplay};
 
+/// A [`Screenplay`] exporter for `pdf`
+///
+/// Uses [`typst`] to create the `pdf` by first exporting the [`Screenplay`] to
+/// a [`typst`] document.
+///
+/// The variables configure the exporter
 #[derive(Default)]
 pub struct PdfExporter {
+    /// Wheter to include synopses in the output
     pub synopses: bool,
 }
 
