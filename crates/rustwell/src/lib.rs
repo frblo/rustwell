@@ -9,29 +9,25 @@
 //! # Examples
 //!
 //! ```
-//! use std::io::BufWriter;
-//! use std::io::stdout;
-//! use rustwell::rich_string::RichString;
-//! use rustwell::{export_html, parse};
+//! use rustwell::{Exporter, ExporterExt, HtmlExporter};
+//! use rustwell::parse;
 //!
-//! fn main() {
-//!     let script = r#"
-//!     Title: Example Screenplay
+//! let script = r#"
+//! Title: Example Screenplay
 //!
-//!     INT. HOUSE – DAY
+//! INT. HOUSE – DAY
 //!
-//!     Someone is knocking on the door.
+//! Someone is knocking on the door.
 //!
-//!     GUEST
-//!     (tired)
-//!     Hey, open up!
-//!     "#;
+//! GUEST
+//! (tired)
+//! Hey, open up!
+//! "#;
 //!
-//!     let parsed = parse(script);
-//!     let mut output = BufWriter::new(stdout());
+//! let parsed = parse(script);
+//! let exporter = HtmlExporter { ..Default::default() };
 //!
-//!     export_html(&parsed, &mut output, false, false);
-//! }
+//! exporter.export_to_stdout(&parsed).unwrap()
 //! ```
 
 use std::io::Read;
@@ -43,9 +39,11 @@ pub mod rich_string;
 pub mod screenplay;
 pub use screenplay::Screenplay;
 
-pub use export::export_html;
-pub use export::export_pdf;
-pub use export::export_typst;
+pub use export::Exporter;
+pub use export::ExporterExt;
+pub use export::html::HtmlExporter;
+pub use export::pdf::PdfExporter;
+pub use export::typst::TypstExporter;
 
 /// Parses a Fountain source string into a [Screenplay] structure.
 ///
@@ -72,8 +70,8 @@ pub fn parse(src: impl AsRef<str>) -> Screenplay {
 }
 
 /// Parses a Fountain source file into a [Screenplay] structure.
-pub fn parse_reader(mut r: impl Read) -> Screenplay {
+pub fn parse_reader(mut r: impl Read) -> std::io::Result<Screenplay> {
     let mut src = String::new();
-    r.read_to_string(&mut src).expect("Failed to read data");
-    parser::parse(&src)
+    r.read_to_string(&mut src)?;
+    Ok(parser::parse(&src))
 }
