@@ -107,19 +107,30 @@ fn generate_pdf(document: &mut Document, size: &PaperSize, screenplay: &Screenpl
                 None => 0,
             };
 
-            match &element {
-                Element::Action(s) => write_element(
+            let mut we = |content, left_magin, right_margin| {
+                write_element(
                     size,
-                    s,
-                    108.0,
-                    72.0,
+                    content,
+                    left_magin,
+                    right_margin,
                     &mut breakpoint_index,
                     &mut line_index,
                     max_lines,
                     &mut surface,
                     fonts,
-                ),
-                _ => unimplemented!(),
+                )
+            };
+
+            match &element {
+                Element::Heading { slug, number } => we(slug, 108.0, 108.0),
+                Element::Action(s) => we(s, 108.0, 72.0),
+                Element::Dialogue(dialogue) => todo!(),
+                Element::DualDialogue(dialogue, dialogue1) => todo!(),
+                Element::Lyrics(rich_string) => todo!(),
+                Element::Transition(rich_string) => todo!(),
+                Element::CenteredText(rich_string) => todo!(),
+                Element::Synopsis(rich_string) => todo!(),
+                Element::PageBreak => break,
             }
 
             line_index += 1;
@@ -222,10 +233,6 @@ fn write_line(
             .unwrap()
             .0;
 
-        dbg!(&string_element.text);
-        dbg!(&start_index);
-        dbg!(&breakpoint_index);
-        // dbg!(&end_byte_index);
         surface.draw_text(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
             font.clone(),
