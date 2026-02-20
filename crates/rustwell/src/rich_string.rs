@@ -80,6 +80,20 @@ impl RichString {
         None
     }
 
+    pub fn get_element_from_index(&self, mut index: usize) -> Option<(&Element, usize)> {
+        if index >= self.len() {
+            return None;
+        }
+        for e in &self.elements {
+            if index >= e.text.len() {
+                index -= e.text.len();
+                continue;
+            }
+            return Some((e, index));
+        }
+        None
+    }
+
     /// Pushes a string onto the [RichString]. Will divide the string into multiple elements with
     /// different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
