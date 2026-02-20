@@ -3,6 +3,7 @@ use std::{io::Write, sync::Arc};
 use krilla::{
     Document,
     geom::Point,
+    page::PageSettings,
     surface::Surface,
     text::{Font, TextDirection},
 };
@@ -65,10 +66,25 @@ impl Exporter for Pdf2Exporter {
             bold_italic: Font::new(bold_italic_data.into(), 0).unwrap(),
         };
 
+        generate_pdf(&mut document, &A4, screenplay, &fonts);
+
         let pdf = document
             .finish()
             .map_err(|_| std::io::Error::other("failed to create pdf"))?;
         writer.write_all(&pdf)
+    }
+}
+
+fn generate_pdf(document: &mut Document, size: &PaperSize, screenplay: &Screenplay, fonts: &Fonts) {
+    let mut screenplay_index = 0;
+    while screenplay_index < screenplay.elements.len() {
+        let mut page =
+            document.start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
+        let mut surface = page.surface();
+        let mut y: f64 = 0.0;
+
+        surface.finish();
+        page.finish();
     }
 }
 
