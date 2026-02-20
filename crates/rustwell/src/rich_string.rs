@@ -14,6 +14,8 @@
 //! assert!(rs.elements[1].is_bold());
 //! ```
 
+use std::slice::SliceIndex;
+
 use bitflags::bitflags;
 
 /// A string that can have different parts styled.
@@ -53,6 +55,29 @@ impl RichString {
         RichString {
             elements: Vec::new(),
         }
+    }
+
+    /// The total length of a [RichString], meaning the total number of [char]s.
+    pub fn len(&self) -> usize {
+        let mut len = 0;
+        for e in &self.elements {
+            len += e.text.len();
+        }
+        len
+    }
+
+    pub fn get_char(&self, mut index: usize) -> Option<char> {
+        if index >= self.len() {
+            return None;
+        }
+        for e in &self.elements {
+            if index >= e.text.len() {
+                index -= e.text.len();
+                continue;
+            }
+            return e.text.chars().nth(index);
+        }
+        None
     }
 
     /// Pushes a string onto the [RichString]. Will divide the string into multiple elements with

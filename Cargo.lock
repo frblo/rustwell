@@ -1880,6 +1880,7 @@ name = "rustwell"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.10.0",
+ "krilla",
  "typst",
  "typst-pdf",
 ]

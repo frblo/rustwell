@@ -10,6 +10,7 @@
 
 pub mod html;
 pub mod pdf;
+pub mod pdf2;
 pub mod typst;
 
 use std::{
