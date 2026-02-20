@@ -8,7 +8,7 @@ use krilla::{
     text::{Font, TextDirection},
 };
 
-use crate::{Exporter, Screenplay, rich_string::RichString};
+use crate::{Exporter, Screenplay, rich_string::RichString, screenplay::Element};
 
 const FONT_SIZE: usize = 12;
 const FONT_WIDTH: f32 = 7.2; // 12 * 0.6 (Courier Prime's aspect ratio)
@@ -36,6 +36,8 @@ struct PaperSize {
 }
 
 const A4: PaperSize = PaperSize { x: 595, y: 842 }; // A4 size in pts
+const TOP_MARGIN: usize = 72;
+const BOTTOM_MARGIN: usize = 72;
 
 /// A [`Screenplay`] exporter for `pdf`
 ///
@@ -77,14 +79,92 @@ impl Exporter for Pdf2Exporter {
 
 fn generate_pdf(document: &mut Document, size: &PaperSize, screenplay: &Screenplay, fonts: &Fonts) {
     let mut screenplay_index = 0;
+
+    let max_lines = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
+    let mut residual_index = None;
+
     while screenplay_index < screenplay.elements.len() {
         let mut page =
             document.start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
         let mut surface = page.surface();
-        let mut y: f64 = 0.0;
+        let mut line_index = 0;
+
+        loop {
+            if line_index >= max_lines {
+                break;
+            }
+
+            if screenplay_index >= screenplay.elements.len() {
+                break;
+            }
+
+            let element = &screenplay.elements[screenplay_index];
+            let mut breakpoint_index = match residual_index {
+                Some(i) => {
+                    residual_index = None;
+                    i
+                }
+                None => 0,
+            };
+
+            match &element {
+                Element::Action(s) => write_element(
+                    size,
+                    s,
+                    108.0,
+                    72.0,
+                    &mut breakpoint_index,
+                    &mut line_index,
+                    max_lines,
+                    &mut surface,
+                    fonts,
+                ),
+                _ => unimplemented!(),
+            }
+
+            line_index += 1;
+            screenplay_index += 1;
+        }
 
         surface.finish();
         page.finish();
+    }
+}
+
+fn write_element(
+    size: &PaperSize,
+    content: &RichString,
+    left_margin: f32,
+    right_margin: f32,
+    breakpoint_index: &mut usize,
+    line_index: &mut usize,
+    max_lines: usize,
+    surface: &mut Surface,
+    fonts: &Fonts,
+) {
+    let span = glyph_span(size, left_margin, right_margin);
+    let breakpoints = break_points(content, span);
+    while *breakpoint_index <= breakpoints.len() {
+        if *line_index >= max_lines {
+            break;
+        }
+
+        let start_index = if *breakpoint_index == 0 {
+            0
+        } else {
+            breakpoints[*breakpoint_index - 1].index
+        };
+        write_line(
+            surface,
+            108.0,
+            (FONT_SIZE * *line_index + TOP_MARGIN) as f32,
+            content,
+            start_index,
+            breakpoints.get(*breakpoint_index),
+            fonts,
+        );
+        *breakpoint_index += 1;
+        *line_index += 1;
     }
 }
 
@@ -94,7 +174,7 @@ fn write_line(
     y: f32,
     content: &RichString,
     mut start_index: usize,
-    breakpoint: &BreakPoint,
+    breakpoint: Option<&BreakPoint>,
     fonts: &Fonts,
 ) {
     match content.get_char(start_index) {
@@ -106,19 +186,24 @@ fn write_line(
         None => todo!(),
     }
 
-    let mut index = start_index;
-    let mut line_index = 0;
-    while index < breakpoint.index {
-        let (string_element, relative_index) = match content.get_element_from_index(index) {
+    let breakpoint_index = match breakpoint {
+        Some(b) => b.index,
+        None => content.len(),
+    };
+
+    let mut glyph_index = 0;
+    while start_index < breakpoint_index {
+        let (string_element, relative_index) = match content.get_element_from_index(start_index) {
             Some(res) => res,
             None => todo!(),
         };
 
-        let relative_break_index = if breakpoint.index - index >= string_element.text.len() - index
+        let relative_break_index = if breakpoint_index - start_index
+            >= string_element.text.chars().count() - relative_index
         {
-            string_element.text.len()
+            string_element.text.chars().count()
         } else {
-            breakpoint.index - (index - relative_index)
+            breakpoint_index - (start_index - relative_index)
         };
         let font = match (
             string_element.is_bold(),
@@ -130,22 +215,33 @@ fn write_line(
             (false, true, _) => &fonts.italic,
             (true, true, _) => &fonts.bold_italic,
         };
+        let mut char_indices = string_element.text.char_indices();
+        let start_byte_index = char_indices.nth(relative_index).unwrap().0;
+        let end_byte_index = char_indices
+            .nth(relative_break_index - relative_index - 2)
+            .unwrap()
+            .0;
+
+        dbg!(&string_element.text);
+        dbg!(&start_index);
+        dbg!(&breakpoint_index);
+        // dbg!(&end_byte_index);
         surface.draw_text(
-            Point::from_xy(x + (line_index as f32 * FONT_WIDTH), y),
+            Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
             font.clone(),
             FONT_SIZE as f32,
-            &string_element.text[relative_index..relative_break_index],
+            &string_element.text[start_byte_index..=end_byte_index],
             false,
             TextDirection::Auto,
         );
 
-        line_index += relative_break_index - relative_index;
-        index = start_index + line_index;
+        glyph_index += relative_break_index - relative_index;
+        start_index += relative_break_index - relative_index;
     }
 }
 
-fn glyph_span(point_span: usize, font_size: usize) -> usize {
-    point_span / font_size
+fn glyph_span(size: &PaperSize, left_margin: f32, right_margin: f32) -> usize {
+    ((size.x as f32 - (left_margin + right_margin)) / FONT_WIDTH) as usize
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -161,17 +257,15 @@ struct BreakPoint {
 }
 
 fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
-    if span < 2 {
-        panic!("Character span cannot be smaller than 2");
-    }
+    assert!(span >= 2);
 
     let mut brekpoints = Vec::with_capacity(content.len() / span + 1);
-    let mut last_space_char = (0, 0);
+    let mut last_whitespace_char = (0, 0);
     let mut line_len = 0;
     for i in 0..content.len() {
         let glyph = match content.get_char(i) {
             Some(g) => g,
-            None => break,
+            None => panic!(),
         };
 
         line_len += 1;
@@ -184,18 +278,13 @@ fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
             continue;
         }
 
-        if glyph.is_whitespace() {
-            last_space_char = (brekpoints.len() + 1, i);
-            continue;
-        }
-
-        if glyph == '-' {
-            last_space_char = (brekpoints.len() + 1, i);
+        if glyph.is_whitespace() || glyph == '-' {
+            last_whitespace_char = (brekpoints.len() + 1, i);
             continue;
         }
 
         if line_len >= span {
-            if brekpoints.len() + 1 != last_space_char.0 {
+            if brekpoints.len() + 1 != last_whitespace_char.0 {
                 brekpoints.push(BreakPoint {
                     index: i,
                     break_type: BreakType::BreakWord,
@@ -205,10 +294,10 @@ fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
             }
 
             brekpoints.push(BreakPoint {
-                index: last_space_char.1 + 1,
+                index: last_whitespace_char.1 + 1,
                 break_type: BreakType::NewLine,
             });
-            line_len = i - last_space_char.1;
+            line_len = i - last_whitespace_char.1;
         }
     }
     brekpoints
@@ -268,6 +357,34 @@ mod tests {
         let breakpoints = break_points(&rs, 7);
         let correct = vec![BreakPoint {
             index: 6,
+            break_type: BreakType::NewLine,
+        }];
+
+        assert_eq!(breakpoints, correct);
+    }
+
+    #[test]
+    fn breaks_rich() {
+        let mut rs = RichString::new();
+        rs.push_str("he**ll**o wor*ld*");
+
+        let breakpoints = break_points(&rs, 6);
+        let correct = vec![BreakPoint {
+            index: 6,
+            break_type: BreakType::NewLine,
+        }];
+
+        assert_eq!(breakpoints, correct);
+    }
+
+    #[test]
+    fn breaks_rich_longer() {
+        let mut rs = RichString::new();
+        rs.push_str("Bosse går till **affären** och köper lite mjölk, vilket han tycker är väldigt gott att äta.");
+
+        let breakpoints = break_points(&rs, 60);
+        let correct = vec![BreakPoint {
+            index: 56,
             break_type: BreakType::NewLine,
         }];
 

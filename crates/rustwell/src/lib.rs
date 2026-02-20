@@ -43,6 +43,7 @@ pub use export::Exporter;
 pub use export::ExporterExt;
 pub use export::html::HtmlExporter;
 pub use export::pdf::PdfExporter;
+pub use export::pdf2::Pdf2Exporter;
 pub use export::typst::TypstExporter;
 
 /// Parses a Fountain source string into a [Screenplay] structure.

@@ -14,8 +14,6 @@
 //! assert!(rs.elements[1].is_bold());
 //! ```
 
-use std::slice::SliceIndex;
-
 use bitflags::bitflags;
 
 /// A string that can have different parts styled.
@@ -61,7 +59,7 @@ impl RichString {
     pub fn len(&self) -> usize {
         let mut len = 0;
         for e in &self.elements {
-            len += e.text.len();
+            len += e.text.chars().count();
         }
         len
     }
@@ -71,8 +69,8 @@ impl RichString {
             return None;
         }
         for e in &self.elements {
-            if index >= e.text.len() {
-                index -= e.text.len();
+            if index >= e.text.chars().count() {
+                index -= e.text.chars().count();
                 continue;
             }
             return e.text.chars().nth(index);
@@ -85,8 +83,8 @@ impl RichString {
             return None;
         }
         for e in &self.elements {
-            if index >= e.text.len() {
-                index -= e.text.len();
+            if index >= e.text.chars().count() {
+                index -= e.text.chars().count();
                 continue;
             }
             return Some((e, index));

@@ -4,7 +4,7 @@ use color_eyre::eyre::bail;
 use rustwell::Exporter;
 use rustwell::ExporterExt;
 use rustwell::HtmlExporter;
-use rustwell::PdfExporter;
+use rustwell::Pdf2Exporter;
 use rustwell::Screenplay;
 use rustwell::TypstExporter;
 
@@ -74,7 +74,7 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
             synopses: cli.synopses,
             ..Default::default()
         }),
-        Target::Pdf => Box::new(PdfExporter {
+        Target::Pdf => Box::new(Pdf2Exporter {
             synopses: cli.synopses,
             ..Default::default()
         }),
