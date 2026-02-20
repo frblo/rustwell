@@ -1,11 +1,8 @@
 use std::{io::Write, sync::Arc};
 
 use krilla::{
-    Document,
-    geom::Point,
-    page::PageSettings,
-    surface::Surface,
-    text::{Font, TextDirection},
+    Document, color::rgb, geom::Point, num::NormalizedF32, page::PageSettings, paint::Fill,
+    surface::Surface, text::Font,
 };
 
 use crate::{Exporter, Screenplay, rich_string::RichString, screenplay::Element};
@@ -68,7 +65,7 @@ impl Exporter for Pdf2Exporter {
             bold_italic: Font::new(bold_italic_data.into(), 0).unwrap(),
         };
 
-        generate_pdf(&mut document, &A4, screenplay, &fonts);
+        self.generate_pdf(&mut document, &A4, screenplay, &fonts);
 
         let pdf = document
             .finish()
@@ -77,68 +74,108 @@ impl Exporter for Pdf2Exporter {
     }
 }
 
-fn generate_pdf(document: &mut Document, size: &PaperSize, screenplay: &Screenplay, fonts: &Fonts) {
-    let mut screenplay_index = 0;
+// TODO: Remove when (if) krilla derives these traits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum TextDirection {
+    LeftToRight,
+    RightToLeft,
+    Centered,
+}
 
-    let max_lines = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
-    let mut residual_index = None;
+impl Pdf2Exporter {
+    fn generate_pdf(
+        &self,
+        document: &mut Document,
+        size: &PaperSize,
+        screenplay: &Screenplay,
+        fonts: &Fonts,
+    ) {
+        let mut screenplay_index = 0;
 
-    while screenplay_index < screenplay.elements.len() {
-        let mut page =
-            document.start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
-        let mut surface = page.surface();
-        let mut line_index = 0;
+        let max_lines = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
+        let mut residual_index = None;
 
-        loop {
-            if line_index >= max_lines {
-                break;
-            }
+        while screenplay_index < screenplay.elements.len() {
+            let mut page = document
+                .start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
+            let mut surface = page.surface();
+            let mut line_index = 0;
 
-            if screenplay_index >= screenplay.elements.len() {
-                break;
-            }
-
-            let element = &screenplay.elements[screenplay_index];
-            let mut breakpoint_index = match residual_index {
-                Some(i) => {
-                    residual_index = None;
-                    i
+            loop {
+                if line_index >= max_lines {
+                    break;
                 }
-                None => 0,
-            };
 
-            let mut we = |content, left_magin, right_margin| {
-                write_element(
-                    size,
-                    content,
-                    left_magin,
-                    right_margin,
-                    &mut breakpoint_index,
-                    &mut line_index,
-                    max_lines,
-                    &mut surface,
-                    fonts,
-                )
-            };
+                if screenplay_index >= screenplay.elements.len() {
+                    break;
+                }
 
-            match &element {
-                Element::Heading { slug, number } => we(slug, 108.0, 108.0),
-                Element::Action(s) => we(s, 108.0, 72.0),
-                Element::Dialogue(dialogue) => todo!(),
-                Element::DualDialogue(dialogue, dialogue1) => todo!(),
-                Element::Lyrics(rich_string) => todo!(),
-                Element::Transition(rich_string) => todo!(),
-                Element::CenteredText(rich_string) => todo!(),
-                Element::Synopsis(rich_string) => todo!(),
-                Element::PageBreak => break,
+                let element = &screenplay.elements[screenplay_index];
+                let mut breakpoint_index = match residual_index {
+                    Some(i) => {
+                        residual_index = None;
+                        i
+                    }
+                    None => 0,
+                };
+
+                let mut we = |content, left_magin, right_margin, text_direction| {
+                    write_element(
+                        size,
+                        content,
+                        left_magin,
+                        right_margin,
+                        &mut breakpoint_index,
+                        &mut line_index,
+                        max_lines,
+                        &mut surface,
+                        fonts,
+                        text_direction,
+                    )
+                };
+
+                match &element {
+                    Element::Heading { slug, number } => {
+                        we(slug, 108.0, 72.0, TextDirection::LeftToRight)
+                    }
+                    Element::Action(s) => we(s, 108.0, 72.0, TextDirection::LeftToRight),
+                    Element::Dialogue(dialogue) => todo!(),
+                    Element::DualDialogue(dialogue, dialogue1) => todo!(),
+                    Element::Lyrics(s) => todo!(),
+                    Element::Transition(s) => we(s, 396.0, 72.0, TextDirection::RightToLeft),
+                    Element::CenteredText(s) => we(s, 144.0, 144.0, TextDirection::Centered),
+                    Element::Synopsis(s) => {
+                        if self.synopses {
+                            surface.set_fill(Some(Fill {
+                                paint: rgb::Color::new(143, 143, 143).into(),
+                                opacity: NormalizedF32::new(0.5).unwrap(),
+                                rule: Default::default(),
+                            }));
+                            write_element(
+                                size,
+                                s,
+                                108.0,
+                                72.0,
+                                &mut breakpoint_index,
+                                &mut line_index,
+                                max_lines,
+                                &mut surface,
+                                fonts,
+                                TextDirection::LeftToRight,
+                            );
+                            surface.set_fill(None);
+                        }
+                    }
+                    Element::PageBreak => break,
+                }
+
+                line_index += 1;
+                screenplay_index += 1;
             }
 
-            line_index += 1;
-            screenplay_index += 1;
+            surface.finish();
+            page.finish();
         }
-
-        surface.finish();
-        page.finish();
     }
 }
 
@@ -152,6 +189,7 @@ fn write_element(
     max_lines: usize,
     surface: &mut Surface,
     fonts: &Fonts,
+    text_direction: TextDirection,
 ) {
     let span = glyph_span(size, left_margin, right_margin);
     let breakpoints = break_points(content, span);
@@ -173,6 +211,8 @@ fn write_element(
             start_index,
             breakpoints.get(*breakpoint_index),
             fonts,
+            text_direction,
+            size,
         );
         *breakpoint_index += 1;
         *line_index += 1;
@@ -181,12 +221,14 @@ fn write_element(
 
 fn write_line(
     surface: &mut Surface,
-    x: f32,
+    mut x: f32,
     y: f32,
     content: &RichString,
     mut start_index: usize,
     breakpoint: Option<&BreakPoint>,
     fonts: &Fonts,
+    text_direction: TextDirection,
+    size: &PaperSize,
 ) {
     match content.get_char(start_index) {
         Some(c) => {
@@ -202,6 +244,12 @@ fn write_line(
         None => content.len(),
     };
 
+    if &text_direction == &TextDirection::Centered {
+        let line_length = breakpoint_index - start_index;
+        let line_span = (line_length / 2) as f32 * FONT_WIDTH;
+        x = (size.x / 2) as f32 - line_span;
+    }
+
     let mut glyph_index = 0;
     while start_index < breakpoint_index {
         let (string_element, relative_index) = match content.get_element_from_index(start_index) {
@@ -216,15 +264,11 @@ fn write_line(
         } else {
             breakpoint_index - (start_index - relative_index)
         };
-        let font = match (
-            string_element.is_bold(),
-            string_element.is_italic(),
-            string_element.is_underline(),
-        ) {
-            (false, false, _) => &fonts.regular,
-            (true, false, _) => &fonts.bold,
-            (false, true, _) => &fonts.italic,
-            (true, true, _) => &fonts.bold_italic,
+        let font = match (string_element.is_bold(), string_element.is_italic()) {
+            (false, false) => &fonts.regular,
+            (true, false) => &fonts.bold,
+            (false, true) => &fonts.italic,
+            (true, true) => &fonts.bold_italic,
         };
         let mut char_indices = string_element.text.char_indices();
         let start_byte_index = char_indices.nth(relative_index).unwrap().0;
@@ -233,13 +277,19 @@ fn write_line(
             .unwrap()
             .0;
 
+        let td = match &text_direction {
+            &TextDirection::RightToLeft => krilla::text::TextDirection::RightToLeft,
+            &TextDirection::LeftToRight => krilla::text::TextDirection::LeftToRight,
+            &TextDirection::Centered => krilla::text::TextDirection::LeftToRight,
+        };
+
         surface.draw_text(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
             font.clone(),
             FONT_SIZE as f32,
             &string_element.text[start_byte_index..=end_byte_index],
             false,
-            TextDirection::Auto,
+            td,
         );
 
         glyph_index += relative_break_index - relative_index;
