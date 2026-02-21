@@ -148,6 +148,7 @@ impl Pdf2Exporter {
                         if line_index + 2 >= max_lines {
                             break;
                         }
+                        let old_breakpoint_index = breakpoint_index;
                         residual_index = write_element(
                             size,
                             &dialogue.character,
@@ -160,6 +161,8 @@ impl Pdf2Exporter {
                             fonts,
                             TextDirection::LeftToRight,
                         );
+                        breakpoint_index = old_breakpoint_index;
+
                         let mut dialogue_index = residual_dialogue.unwrap_or(0);
                         while dialogue_index < dialogue.elements.len() {
                             if line_index >= max_lines {
