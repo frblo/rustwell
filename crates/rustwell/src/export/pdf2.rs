@@ -5,7 +5,11 @@ use krilla::{
     surface::Surface, text::Font,
 };
 
-use crate::{Exporter, Screenplay, rich_string::RichString, screenplay::Element};
+use crate::{
+    Exporter, Screenplay,
+    rich_string::RichString,
+    screenplay::{DialogueElement, Element},
+};
 
 const FONT_SIZE: usize = 12;
 const FONT_WIDTH: f32 = 7.2; // 12 * 0.6 (Courier Prime's aspect ratio)
@@ -94,6 +98,7 @@ impl Pdf2Exporter {
 
         let max_lines = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
         let mut residual_index = None;
+        let mut residual_dialogue = None;
 
         while screenplay_index < screenplay.elements.len() {
             let mut page = document
@@ -101,7 +106,7 @@ impl Pdf2Exporter {
             let mut surface = page.surface();
             let mut line_index = 0;
 
-            loop {
+            'element_loop: loop {
                 if line_index >= max_lines {
                     break;
                 }
@@ -120,7 +125,7 @@ impl Pdf2Exporter {
                 };
 
                 let mut we = |content, left_magin, right_margin, text_direction| {
-                    write_element(
+                    residual_index = write_element(
                         size,
                         content,
                         left_magin,
@@ -139,7 +144,65 @@ impl Pdf2Exporter {
                         we(slug, 108.0, 72.0, TextDirection::LeftToRight)
                     }
                     Element::Action(s) => we(s, 108.0, 72.0, TextDirection::LeftToRight),
-                    Element::Dialogue(dialogue) => todo!(),
+                    Element::Dialogue(dialogue) => {
+                        if line_index + 2 >= max_lines {
+                            break;
+                        }
+                        residual_index = write_element(
+                            size,
+                            &dialogue.character,
+                            252.0,
+                            108.0,
+                            &mut breakpoint_index,
+                            &mut line_index,
+                            max_lines,
+                            &mut surface,
+                            fonts,
+                            TextDirection::LeftToRight,
+                        );
+                        let mut dialogue_index = residual_dialogue.unwrap_or(0);
+                        while dialogue_index < dialogue.elements.len() {
+                            if line_index >= max_lines {
+                                residual_dialogue = Some(dialogue_index);
+                                break 'element_loop;
+                            }
+
+                            match &dialogue.elements[dialogue_index] {
+                                DialogueElement::Parenthetical(s) => {
+                                    residual_index = write_element(
+                                        size,
+                                        &s,
+                                        223.2,
+                                        180.0,
+                                        &mut breakpoint_index,
+                                        &mut line_index,
+                                        max_lines,
+                                        &mut surface,
+                                        fonts,
+                                        TextDirection::LeftToRight,
+                                    )
+                                }
+                                DialogueElement::Line(s) => {
+                                    residual_index = write_element(
+                                        size,
+                                        &s,
+                                        180.0,
+                                        144.0,
+                                        &mut breakpoint_index,
+                                        &mut line_index,
+                                        max_lines,
+                                        &mut surface,
+                                        fonts,
+                                        TextDirection::LeftToRight,
+                                    )
+                                }
+                            }
+
+                            dialogue_index += 1;
+                        }
+
+                        residual_dialogue = None;
+                    }
                     Element::DualDialogue(dialogue, dialogue1) => todo!(),
                     Element::Lyrics(s) => todo!(),
                     Element::Transition(s) => we(s, 396.0, 72.0, TextDirection::RightToLeft),
@@ -166,7 +229,10 @@ impl Pdf2Exporter {
                             surface.set_fill(None);
                         }
                     }
-                    Element::PageBreak => break,
+                    Element::PageBreak => {
+                        screenplay_index += 1;
+                        break;
+                    }
                 }
 
                 line_index += 1;
@@ -190,12 +256,12 @@ fn write_element(
     surface: &mut Surface,
     fonts: &Fonts,
     text_direction: TextDirection,
-) {
+) -> Option<usize> {
     let span = glyph_span(size, left_margin, right_margin);
     let breakpoints = break_points(content, span);
     while *breakpoint_index <= breakpoints.len() {
         if *line_index >= max_lines {
-            break;
+            return Some(*breakpoint_index);
         }
 
         let start_index = if *breakpoint_index == 0 {
@@ -205,7 +271,7 @@ fn write_element(
         };
         write_line(
             surface,
-            108.0,
+            left_margin,
             (FONT_SIZE * *line_index + TOP_MARGIN) as f32,
             content,
             start_index,
@@ -217,6 +283,7 @@ fn write_element(
         *breakpoint_index += 1;
         *line_index += 1;
     }
+    None
 }
 
 fn write_line(
@@ -257,13 +324,14 @@ fn write_line(
             None => todo!(),
         };
 
-        let relative_break_index = if breakpoint_index - start_index
-            >= string_element.text.chars().count() - relative_index
-        {
-            string_element.text.chars().count()
-        } else {
-            breakpoint_index - (start_index - relative_index)
-        };
+        let element_length = string_element.text.chars().count();
+
+        let relative_break_index =
+            if breakpoint_index - start_index >= element_length - relative_index {
+                element_length
+            } else {
+                breakpoint_index - (start_index - relative_index)
+            };
         let font = match (string_element.is_bold(), string_element.is_italic()) {
             (false, false) => &fonts.regular,
             (true, false) => &fonts.bold,
@@ -272,10 +340,10 @@ fn write_line(
         };
         let mut char_indices = string_element.text.char_indices();
         let start_byte_index = char_indices.nth(relative_index).unwrap().0;
-        let end_byte_index = char_indices
-            .nth(relative_break_index - relative_index - 2)
-            .unwrap()
-            .0;
+        let end_byte_index = match char_indices.nth(relative_break_index - relative_index - 1) {
+            Some((i, _)) => i,
+            None => string_element.text.len(),
+        };
 
         let td = match &text_direction {
             &TextDirection::RightToLeft => krilla::text::TextDirection::RightToLeft,
@@ -287,7 +355,7 @@ fn write_line(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
             font.clone(),
             FONT_SIZE as f32,
-            &string_element.text[start_byte_index..=end_byte_index],
+            &string_element.text[start_byte_index..end_byte_index],
             false,
             td,
         );
