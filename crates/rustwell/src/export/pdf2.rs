@@ -40,6 +40,62 @@ const A4: PaperSize = PaperSize { x: 595, y: 842 }; // A4 size in pts
 const TOP_MARGIN: usize = 72;
 const BOTTOM_MARGIN: usize = 72;
 
+struct Margin {
+    pub left: f32,
+    pub right: f32,
+}
+
+struct Margins {
+    pub heading: Margin,
+    pub action: Margin,
+    pub character: Margin,
+    pub parenthetical: Margin,
+    pub dialogue: Margin,
+    pub lyrics: Margin,
+    pub transition: Margin,
+    pub centered: Margin,
+    pub synopsis: Margin,
+}
+
+const MARGINS: Margins = Margins {
+    heading: Margin {
+        left: 108.0,
+        right: 72.0,
+    },
+    action: Margin {
+        left: 108.0,
+        right: 72.0,
+    },
+    character: Margin {
+        left: 252.0,
+        right: 108.0,
+    },
+    parenthetical: Margin {
+        left: 223.2,
+        right: 180.0,
+    },
+    dialogue: Margin {
+        left: 180.0,
+        right: 144.0,
+    },
+    lyrics: Margin {
+        left: 180.0,
+        right: 144.0,
+    },
+    transition: Margin {
+        left: 396.0,
+        right: 144.0,
+    },
+    centered: Margin {
+        left: 144.0,
+        right: 144.0,
+    },
+    synopsis: Margin {
+        left: 108.0,
+        right: 72.0,
+    },
+};
+
 /// A [`Screenplay`] exporter for `pdf`
 ///
 /// The variables configure the exporter
@@ -80,7 +136,7 @@ impl Exporter for Pdf2Exporter {
 
 // TODO: Remove when (if) krilla derives these traits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum TextDirection {
+enum Alignment {
     LeftToRight,
     RightToLeft,
     Centered,
@@ -124,12 +180,11 @@ impl Pdf2Exporter {
                     None => 0,
                 };
 
-                let mut we = |content, left_magin, right_margin, text_direction| {
+                let mut we = |content, margin, text_direction| {
                     residual_index = write_element(
                         size,
                         content,
-                        left_magin,
-                        right_margin,
+                        margin,
                         &mut breakpoint_index,
                         &mut line_index,
                         max_lines,
@@ -141,25 +196,39 @@ impl Pdf2Exporter {
 
                 match &element {
                     Element::Heading { slug, number } => {
-                        we(slug, 108.0, 72.0, TextDirection::LeftToRight)
+                        we(slug, MARGINS.heading, Alignment::LeftToRight)
                     }
-                    Element::Action(s) => we(s, 108.0, 72.0, TextDirection::LeftToRight),
+                    Element::Action(s) => we(s, MARGINS.action, Alignment::LeftToRight),
                     Element::Dialogue(dialogue) => {
-                        if line_index + 2 >= max_lines {
+                        let mut character_name = dialogue.character.clone();
+                        match (residual_dialogue, &dialogue.extension) {
+                            (Some(_), _) => {
+                                character_name.append(" (cont'd)".into());
+                            }
+                            (None, Some(ext)) => {
+                                character_name.append(" (".into());
+                                character_name.append(ext.clone());
+                                character_name.append(")".into());
+                            }
+                            _ => (),
+                        };
+                        let span =
+                            glyph_span(size, MARGINS.character.left, MARGINS.character.right);
+                        let name_lines_count = break_points(&character_name, span).len() + 1;
+                        if line_index + name_lines_count + 1 >= max_lines {
                             break;
                         }
                         let old_breakpoint_index = breakpoint_index;
                         residual_index = write_element(
                             size,
-                            &dialogue.character,
-                            252.0,
-                            108.0,
+                            &character_name,
+                            MARGINS.character,
                             &mut breakpoint_index,
                             &mut line_index,
                             max_lines,
                             &mut surface,
                             fonts,
-                            TextDirection::LeftToRight,
+                            Alignment::LeftToRight,
                         );
                         breakpoint_index = old_breakpoint_index;
 
@@ -167,6 +236,18 @@ impl Pdf2Exporter {
                         while dialogue_index < dialogue.elements.len() {
                             if line_index >= max_lines {
                                 residual_dialogue = Some(dialogue_index);
+                                write_element(
+                                    size,
+                                    &"(MORE)".into(),
+                                    MARGINS.character,
+                                    &mut breakpoint_index,
+                                    &mut line_index,
+                                    max_lines,
+                                    &mut surface,
+                                    fonts,
+                                    Alignment::LeftToRight,
+                                );
+
                                 break 'element_loop;
                             }
 
@@ -175,28 +256,26 @@ impl Pdf2Exporter {
                                     residual_index = write_element(
                                         size,
                                         &s,
-                                        223.2,
-                                        180.0,
+                                        MARGINS.parenthetical,
                                         &mut breakpoint_index,
                                         &mut line_index,
                                         max_lines,
                                         &mut surface,
                                         fonts,
-                                        TextDirection::LeftToRight,
+                                        Alignment::LeftToRight,
                                     )
                                 }
                                 DialogueElement::Line(s) => {
                                     residual_index = write_element(
                                         size,
                                         &s,
-                                        180.0,
-                                        144.0,
+                                        MARGINS.dialogue,
                                         &mut breakpoint_index,
                                         &mut line_index,
                                         max_lines,
                                         &mut surface,
                                         fonts,
-                                        TextDirection::LeftToRight,
+                                        Alignment::LeftToRight,
                                     )
                                 }
                             }
@@ -208,8 +287,8 @@ impl Pdf2Exporter {
                     }
                     Element::DualDialogue(dialogue, dialogue1) => todo!(),
                     Element::Lyrics(s) => todo!(),
-                    Element::Transition(s) => we(s, 396.0, 72.0, TextDirection::RightToLeft),
-                    Element::CenteredText(s) => we(s, 144.0, 144.0, TextDirection::Centered),
+                    Element::Transition(s) => we(s, MARGINS.transition, Alignment::RightToLeft),
+                    Element::CenteredText(s) => we(s, MARGINS.centered, Alignment::Centered),
                     Element::Synopsis(s) => {
                         if self.synopses {
                             surface.set_fill(Some(Fill {
@@ -220,14 +299,13 @@ impl Pdf2Exporter {
                             write_element(
                                 size,
                                 s,
-                                108.0,
-                                72.0,
+                                MARGINS.synopsis,
                                 &mut breakpoint_index,
                                 &mut line_index,
                                 max_lines,
                                 &mut surface,
                                 fonts,
-                                TextDirection::LeftToRight,
+                                Alignment::LeftToRight,
                             );
                             surface.set_fill(None);
                         }
@@ -251,15 +329,16 @@ impl Pdf2Exporter {
 fn write_element(
     size: &PaperSize,
     content: &RichString,
-    left_margin: f32,
-    right_margin: f32,
+    margin: Margin,
     breakpoint_index: &mut usize,
     line_index: &mut usize,
     max_lines: usize,
     surface: &mut Surface,
     fonts: &Fonts,
-    text_direction: TextDirection,
+    text_direction: Alignment,
 ) -> Option<usize> {
+    let left_margin = margin.left;
+    let right_margin = margin.right;
     let span = glyph_span(size, left_margin, right_margin);
     let breakpoints = break_points(content, span);
     while *breakpoint_index <= breakpoints.len() {
@@ -297,7 +376,7 @@ fn write_line(
     mut start_index: usize,
     breakpoint: Option<&BreakPoint>,
     fonts: &Fonts,
-    text_direction: TextDirection,
+    text_direction: Alignment,
     size: &PaperSize,
 ) {
     match content.get_char(start_index) {
@@ -314,7 +393,7 @@ fn write_line(
         None => content.len(),
     };
 
-    if &text_direction == &TextDirection::Centered {
+    if &text_direction == &Alignment::Centered {
         let line_length = breakpoint_index - start_index;
         let line_span = (line_length / 2) as f32 * FONT_WIDTH;
         x = (size.x / 2) as f32 - line_span;
@@ -349,9 +428,9 @@ fn write_line(
         };
 
         let td = match &text_direction {
-            &TextDirection::RightToLeft => krilla::text::TextDirection::RightToLeft,
-            &TextDirection::LeftToRight => krilla::text::TextDirection::LeftToRight,
-            &TextDirection::Centered => krilla::text::TextDirection::LeftToRight,
+            &Alignment::RightToLeft => krilla::text::TextDirection::RightToLeft,
+            &Alignment::LeftToRight => krilla::text::TextDirection::LeftToRight,
+            &Alignment::Centered => krilla::text::TextDirection::LeftToRight,
         };
 
         surface.draw_text(
@@ -385,7 +464,7 @@ struct BreakPoint {
 }
 
 fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
-    assert!(span >= 2);
+    debug_assert!(span >= 2);
 
     let mut brekpoints = Vec::with_capacity(content.len() / span + 1);
     let mut last_whitespace_char = (0, 0);

@@ -92,6 +92,10 @@ impl RichString {
         None
     }
 
+    pub fn append(&mut self, mut other: Self) {
+        self.elements.append(&mut other.elements);
+    }
+
     /// Pushes a string onto the [RichString]. Will divide the string into multiple elements with
     /// different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
