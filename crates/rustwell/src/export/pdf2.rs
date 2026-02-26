@@ -218,31 +218,32 @@ impl Pdf2Exporter {
                         if line_index + name_lines_count + 1 >= max_lines {
                             break;
                         }
-                        let old_breakpoint_index = breakpoint_index;
+                        if name_lines_count > max_lines {
+                            panic!("Character name cannot be longer than page");
+                        }
                         residual_index = write_element(
                             size,
                             &character_name,
                             MARGINS.character,
-                            &mut breakpoint_index,
+                            &mut 0,
                             &mut line_index,
                             max_lines,
                             &mut surface,
                             fonts,
                             Alignment::LeftToRight,
                         );
-                        breakpoint_index = old_breakpoint_index;
 
                         let mut dialogue_index = residual_dialogue.unwrap_or(0);
                         while dialogue_index < dialogue.elements.len() {
-                            if line_index >= max_lines {
+                            if line_index + 1 >= max_lines {
                                 residual_dialogue = Some(dialogue_index);
                                 write_element(
                                     size,
                                     &"(MORE)".into(),
                                     MARGINS.character,
-                                    &mut breakpoint_index,
+                                    &mut 0,
                                     &mut line_index,
-                                    max_lines,
+                                    max_lines + 1,
                                     &mut surface,
                                     fonts,
                                     Alignment::LeftToRight,
@@ -250,6 +251,13 @@ impl Pdf2Exporter {
 
                                 break 'element_loop;
                             }
+                            let mut breakpoint_index = match residual_index {
+                                Some(i) => {
+                                    residual_index = None;
+                                    i
+                                }
+                                None => 0,
+                            };
 
                             match &dialogue.elements[dialogue_index] {
                                 DialogueElement::Parenthetical(s) => {
@@ -280,13 +288,17 @@ impl Pdf2Exporter {
                                 }
                             }
 
+                            if residual_index.is_some() {
+                                continue;
+                            }
+
                             dialogue_index += 1;
                         }
 
                         residual_dialogue = None;
                     }
                     Element::DualDialogue(dialogue, dialogue1) => todo!(),
-                    Element::Lyrics(s) => todo!(),
+                    Element::Lyrics(s) => we(s, MARGINS.lyrics, Alignment::RightToLeft),
                     Element::Transition(s) => we(s, MARGINS.transition, Alignment::RightToLeft),
                     Element::CenteredText(s) => we(s, MARGINS.centered, Alignment::Centered),
                     Element::Synopsis(s) => {
