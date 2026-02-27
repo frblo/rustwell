@@ -140,6 +140,7 @@ div.action p {
 }
 div.dialog,div.dual {
     margin-top: 1em;
+    overflow: hidden;
 }
 div.transition {
     margin-top: 1em;
