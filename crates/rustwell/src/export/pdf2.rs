@@ -8,7 +8,7 @@ use krilla::{
 use crate::{
     Exporter, Screenplay,
     rich_string::RichString,
-    screenplay::{DialogueElement, Element},
+    screenplay::{Dialogue, DialogueElement, Element},
 };
 
 const FONT_SIZE: usize = 12;
@@ -157,13 +157,15 @@ impl Pdf2Exporter {
         let mut residual_index = None;
         let mut residual_dialogue = None;
 
+        let mut residual_dual_dialogue = (None, None);
+
         while screenplay_index < screenplay.elements.len() {
             let mut page = document
                 .start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
             let mut surface = page.surface();
             let mut line_index = 0;
 
-            'element_loop: loop {
+            loop {
                 if line_index >= max_lines {
                     break;
                 }
@@ -201,104 +203,48 @@ impl Pdf2Exporter {
                     }
                     Element::Action(s) => we(s, MARGINS.action, Alignment::LeftToRight),
                     Element::Dialogue(dialogue) => {
-                        let mut character_name = dialogue.character.clone();
-                        match (residual_dialogue, &dialogue.extension) {
-                            (Some(_), _) => {
-                                character_name.append(" (cont'd)".into());
-                            }
-                            (None, Some(ext)) => {
-                                character_name.append(" (".into());
-                                character_name.append(ext.clone());
-                                character_name.append(")".into());
-                            }
-                            _ => (),
-                        };
-                        let span =
-                            glyph_span(size, MARGINS.character.left, MARGINS.character.right);
-                        let name_lines_count = break_points(&character_name, span).len() + 1;
-                        if line_index + name_lines_count + 1 >= max_lines {
-                            break;
-                        }
-                        if name_lines_count > max_lines {
-                            panic!("Character name cannot be longer than page");
-                        }
-                        residual_index = write_element(
+                        write_dialogue(
+                            dialogue,
+                            &mut residual_dialogue,
+                            &mut residual_index,
                             size,
-                            &character_name,
-                            MARGINS.character,
-                            &mut 0,
-                            &mut line_index,
                             max_lines,
+                            &mut line_index,
                             &mut surface,
                             fonts,
-                            Alignment::LeftToRight,
                         );
-
-                        let mut dialogue_index = residual_dialogue.unwrap_or(0);
-                        while dialogue_index < dialogue.elements.len() {
-                            if line_index + 1 >= max_lines {
-                                residual_dialogue = Some(dialogue_index);
-                                write_element(
-                                    size,
-                                    &"(MORE)".into(),
-                                    MARGINS.character,
-                                    &mut 0,
-                                    &mut line_index,
-                                    max_lines + 1,
-                                    &mut surface,
-                                    fonts,
-                                    Alignment::LeftToRight,
-                                );
-
-                                break 'element_loop;
-                            }
-                            let mut breakpoint_index = match residual_index {
-                                Some(i) => {
-                                    residual_index = None;
-                                    i
-                                }
-                                None => 0,
-                            };
-
-                            match &dialogue.elements[dialogue_index] {
-                                DialogueElement::Parenthetical(s) => {
-                                    residual_index = write_element(
-                                        size,
-                                        &s,
-                                        MARGINS.parenthetical,
-                                        &mut breakpoint_index,
-                                        &mut line_index,
-                                        max_lines,
-                                        &mut surface,
-                                        fonts,
-                                        Alignment::LeftToRight,
-                                    )
-                                }
-                                DialogueElement::Line(s) => {
-                                    residual_index = write_element(
-                                        size,
-                                        &s,
-                                        MARGINS.dialogue,
-                                        &mut breakpoint_index,
-                                        &mut line_index,
-                                        max_lines,
-                                        &mut surface,
-                                        fonts,
-                                        Alignment::LeftToRight,
-                                    )
-                                }
-                            }
-
-                            if residual_index.is_some() {
-                                continue;
-                            }
-
-                            dialogue_index += 1;
+                        if residual_dialogue.is_some() {
+                            break;
                         }
-
-                        residual_dialogue = None;
                     }
-                    Element::DualDialogue(dialogue, dialogue1) => todo!(),
+                    Element::DualDialogue(dialogue0, dialogue1) => {
+                        let mut initial_line_index = line_index;
+                        write_dialogue(
+                            dialogue0,
+                            &mut residual_dual_dialogue.0,
+                            &mut residual_index,
+                            size,
+                            max_lines,
+                            &mut line_index,
+                            &mut surface,
+                            fonts,
+                        );
+                        write_dialogue(
+                            dialogue1,
+                            &mut residual_dual_dialogue.1,
+                            &mut residual_index,
+                            size,
+                            max_lines,
+                            &mut initial_line_index,
+                            &mut surface,
+                            fonts,
+                        );
+                        line_index = line_index.max(initial_line_index);
+                        if residual_dual_dialogue.0.is_some() || residual_dual_dialogue.1.is_some()
+                        {
+                            break;
+                        }
+                    }
                     Element::Lyrics(s) => we(s, MARGINS.lyrics, Alignment::RightToLeft),
                     Element::Transition(s) => we(s, MARGINS.transition, Alignment::RightToLeft),
                     Element::CenteredText(s) => we(s, MARGINS.centered, Alignment::Centered),
@@ -337,6 +283,112 @@ impl Pdf2Exporter {
             page.finish();
         }
     }
+}
+
+fn write_dialogue(
+    dialogue: &Dialogue,
+    residual_dialogue: &mut Option<usize>,
+    residual_index: &mut Option<usize>,
+    size: &PaperSize,
+    max_lines: usize,
+    line_index: &mut usize,
+    surface: &mut Surface,
+    fonts: &Fonts,
+) {
+    let mut character_name = dialogue.character.clone();
+    match (*residual_dialogue, &dialogue.extension) {
+        (Some(_), _) => {
+            character_name.append(" (cont'd)".into());
+        }
+        (None, Some(ext)) => {
+            character_name.append(" (".into());
+            character_name.append(ext.clone());
+            character_name.append(")".into());
+        }
+        _ => (),
+    };
+    let span = glyph_span(size, MARGINS.character.left, MARGINS.character.right);
+    let name_lines_count = break_points(&character_name, span).len() + 1;
+    if *line_index + name_lines_count + 1 >= max_lines {
+        return;
+    }
+    assert!(name_lines_count < max_lines);
+
+    *residual_index = write_element(
+        size,
+        &character_name,
+        MARGINS.character,
+        &mut 0,
+        line_index,
+        max_lines,
+        surface,
+        fonts,
+        Alignment::LeftToRight,
+    );
+
+    let mut dialogue_index = residual_dialogue.unwrap_or(0);
+    while dialogue_index < dialogue.elements.len() {
+        if *line_index + 1 >= max_lines {
+            *residual_dialogue = Some(dialogue_index);
+            write_element(
+                size,
+                &"(MORE)".into(),
+                MARGINS.character,
+                &mut 0,
+                line_index,
+                max_lines + 1,
+                surface,
+                fonts,
+                Alignment::LeftToRight,
+            );
+
+            return;
+        }
+        let mut breakpoint_index = match *residual_index {
+            Some(i) => {
+                *residual_index = None;
+                i
+            }
+            None => 0,
+        };
+
+        match &dialogue.elements[dialogue_index] {
+            DialogueElement::Parenthetical(s) => {
+                *residual_index = write_element(
+                    size,
+                    &s,
+                    MARGINS.parenthetical,
+                    &mut breakpoint_index,
+                    line_index,
+                    max_lines,
+                    surface,
+                    fonts,
+                    Alignment::LeftToRight,
+                )
+            }
+            DialogueElement::Line(s) => {
+                *residual_index = write_element(
+                    size,
+                    &s,
+                    MARGINS.dialogue,
+                    &mut breakpoint_index,
+                    line_index,
+                    max_lines,
+                    surface,
+                    fonts,
+                    Alignment::LeftToRight,
+                )
+            }
+        }
+
+        if residual_index.is_some() {
+            continue;
+        }
+
+        dialogue_index += 1;
+    }
+
+    *residual_dialogue = None;
 }
 
 fn write_element(
