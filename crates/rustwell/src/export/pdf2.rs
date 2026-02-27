@@ -31,12 +31,14 @@ struct Fonts {
     pub bold_italic: Font,
 }
 
-struct PaperSize {
+pub struct PaperSize {
     pub x: usize,
     pub y: usize,
 }
 
-const A4: PaperSize = PaperSize { x: 595, y: 842 }; // A4 size in pts
+pub const A4: PaperSize = PaperSize { x: 595, y: 842 }; // A4 size in pts
+pub const LETTER: PaperSize = PaperSize { x: 612, y: 792 }; // Letter size in pts
+
 const TOP_MARGIN: usize = 72;
 const BOTTOM_MARGIN: usize = 72;
 
@@ -134,7 +136,6 @@ impl Exporter for Pdf2Exporter {
     }
 }
 
-// TODO: Remove when (if) krilla derives these traits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Alignment {
     LeftToRight,
