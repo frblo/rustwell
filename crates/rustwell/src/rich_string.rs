@@ -14,6 +14,8 @@
 //! assert!(rs.elements[1].is_bold());
 //! ```
 
+use std::str::Chars;
+
 use bitflags::bitflags;
 
 /// A string that can have different parts styled.
@@ -90,6 +92,14 @@ impl RichString {
             return Some((e, index));
         }
         None
+    }
+
+    pub fn iter(&'_ self) -> RichIterator<'_> {
+        RichIterator {
+            rich_string: self,
+            element_idx: 0,
+            chars_iterator: self.elements[0].text.chars(),
+        }
     }
 
     pub fn append(&mut self, mut other: Self) {
@@ -192,6 +202,29 @@ where
         let mut out = RichString::new();
         out.push_str(str);
         out
+    }
+}
+
+pub struct RichIterator<'a> {
+    rich_string: &'a RichString,
+    element_idx: usize,
+    chars_iterator: Chars<'a>,
+}
+
+impl<'a> Iterator for RichIterator<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.chars_iterator.next();
+        if next.is_some() {
+            return next;
+        }
+        self.element_idx += 1;
+        if self.element_idx >= self.rich_string.elements.len() {
+            return None;
+        }
+        self.chars_iterator = self.rich_string.elements[self.element_idx].text.chars();
+        self.chars_iterator.next()
     }
 }
 

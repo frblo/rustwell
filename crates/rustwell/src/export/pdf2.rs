@@ -481,12 +481,7 @@ fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
     let mut brekpoints = Vec::with_capacity(content.len() / span + 1);
     let mut last_whitespace_char = (0, 0);
     let mut line_len = 0;
-    for i in 0..content.len() {
-        let glyph = match content.get_char(i) {
-            Some(g) => g,
-            None => panic!(),
-        };
-
+    for (i, glyph) in content.iter().enumerate() {
         line_len += 1;
         if glyph == '\n' {
             brekpoints.push(BreakPoint {
