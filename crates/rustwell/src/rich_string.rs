@@ -186,6 +186,15 @@ impl RichString {
 
         self.elements.push(Element { text, attributes });
     }
+
+    pub fn to_string(&self) -> String {
+        let mut str = String::with_capacity(self.len());
+        for element in &self.elements {
+            str.push_str(&element.text);
+        }
+
+        str
+    }
 }
 
 impl Default for RichString {

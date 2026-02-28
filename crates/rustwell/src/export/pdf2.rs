@@ -1,8 +1,16 @@
 use std::{io::Write, sync::Arc};
 
 use krilla::{
-    Document, color::rgb, geom::Point, num::NormalizedF32, page::PageSettings, paint::Fill,
-    surface::Surface, text::Font,
+    Document,
+    color::rgb,
+    destination::XyzDestination,
+    geom::Point,
+    num::NormalizedF32,
+    outline::{Outline, OutlineNode},
+    page::PageSettings,
+    paint::Fill,
+    surface::Surface,
+    text::Font,
 };
 
 use crate::{
@@ -42,7 +50,6 @@ pub const LETTER: PaperSize = PaperSize { x: 612, y: 792 }; // Letter size in pt
 const TOP_MARGIN: usize = 72;
 const BOTTOM_MARGIN: usize = 72;
 
-// #[derive(Clone, Copy)]
 struct Margin {
     pub left: f32,
     pub right: f32,
@@ -196,12 +203,16 @@ impl Pdf2Exporter {
     ) {
         let mut screenplay_index = 0;
 
+        let mut page_index = 0;
+
         let max_lines = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
         let mut residual_index = None;
         let mut residual_dialogue = None;
 
         let mut residual_dual_dialogue = (None, None);
         let mut residual_dual_index = (None, None);
+
+        let mut outline = Outline::new();
 
         while screenplay_index < screenplay.elements.len() {
             let mut page = document
@@ -243,7 +254,34 @@ impl Pdf2Exporter {
 
                 match &element {
                     Element::Heading { slug, number } => {
-                        we(slug, &MARGINS.heading, Alignment::LeftToRight)
+                        if number.is_some() {
+                            let initial_line_index = line_index;
+
+                            let left_number_margin = Margin { left: 54.0, right: size.x as  };
+
+                            line_index = initial_line_index;
+                        }
+                        outline.push_child(OutlineNode::new(
+                            slug.to_string(),
+                            XyzDestination::new(
+                                page_index,
+                                Point {
+                                    x: MARGINS.heading.left,
+                                    y: (TOP_MARGIN + (line_index * FONT_SIZE) - FONT_SIZE) as f32,
+                                },
+                            ),
+                        ));
+                        residual_index = write_element(
+                            size,
+                            slug,
+                            &MARGINS.heading,
+                            &mut breakpoint_index,
+                            &mut line_index,
+                            max_lines,
+                            &mut surface,
+                            fonts,
+                            Alignment::LeftToRight,
+                        )
                     }
                     Element::Action(s) => we(s, &MARGINS.action, Alignment::LeftToRight),
                     Element::Dialogue(dialogue) => {
@@ -338,7 +376,9 @@ impl Pdf2Exporter {
 
             surface.finish();
             page.finish();
+            page_index += 1;
         }
+        document.set_outline(outline);
     }
 }
 
