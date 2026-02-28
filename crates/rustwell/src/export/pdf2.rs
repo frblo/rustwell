@@ -42,17 +42,28 @@ pub const LETTER: PaperSize = PaperSize { x: 612, y: 792 }; // Letter size in pt
 const TOP_MARGIN: usize = 72;
 const BOTTOM_MARGIN: usize = 72;
 
+// #[derive(Clone, Copy)]
 struct Margin {
     pub left: f32,
     pub right: f32,
 }
 
+struct DialogueMargins {
+    pub character: Margin,
+    pub parenthetical: Margin,
+    pub line: Margin,
+}
+
+struct DualDialogueMargins {
+    pub left: DialogueMargins,
+    pub right: DialogueMargins,
+}
+
 struct Margins {
     pub heading: Margin,
     pub action: Margin,
-    pub character: Margin,
-    pub parenthetical: Margin,
-    pub dialogue: Margin,
+    pub dialogue: DialogueMargins,
+    pub dual_dialogue: DualDialogueMargins,
     pub lyrics: Margin,
     pub transition: Margin,
     pub centered: Margin,
@@ -68,17 +79,49 @@ const MARGINS: Margins = Margins {
         left: 108.0,
         right: 72.0,
     },
-    character: Margin {
-        left: 252.0,
-        right: 108.0,
+    dialogue: DialogueMargins {
+        character: Margin {
+            left: 252.0,
+            right: 108.0,
+        },
+        parenthetical: Margin {
+            left: 223.2,
+            right: 180.0,
+        },
+        line: Margin {
+            left: 180.0,
+            right: 144.0,
+        },
     },
-    parenthetical: Margin {
-        left: 223.2,
-        right: 180.0,
-    },
-    dialogue: Margin {
-        left: 180.0,
-        right: 144.0,
+    dual_dialogue: DualDialogueMargins {
+        left: DialogueMargins {
+            character: Margin {
+                left: 198.0,
+                right: 288.0,
+            },
+            parenthetical: Margin {
+                left: 162.0,
+                right: 324.0,
+            },
+            line: Margin {
+                left: 144.0,
+                right: 288.0,
+            },
+        },
+        right: DialogueMargins {
+            character: Margin {
+                left: 414.0,
+                right: 72.0,
+            },
+            parenthetical: Margin {
+                left: 378.0,
+                right: 90.0,
+            },
+            line: Margin {
+                left: 360.0,
+                right: 72.0,
+            },
+        },
     },
     lyrics: Margin {
         left: 180.0,
@@ -158,6 +201,7 @@ impl Pdf2Exporter {
         let mut residual_dialogue = None;
 
         let mut residual_dual_dialogue = (None, None);
+        let mut residual_dual_index = (None, None);
 
         while screenplay_index < screenplay.elements.len() {
             let mut page = document
@@ -199,9 +243,9 @@ impl Pdf2Exporter {
 
                 match &element {
                     Element::Heading { slug, number } => {
-                        we(slug, MARGINS.heading, Alignment::LeftToRight)
+                        we(slug, &MARGINS.heading, Alignment::LeftToRight)
                     }
-                    Element::Action(s) => we(s, MARGINS.action, Alignment::LeftToRight),
+                    Element::Action(s) => we(s, &MARGINS.action, Alignment::LeftToRight),
                     Element::Dialogue(dialogue) => {
                         write_dialogue(
                             dialogue,
@@ -212,6 +256,7 @@ impl Pdf2Exporter {
                             &mut line_index,
                             &mut surface,
                             fonts,
+                            &MARGINS.dialogue,
                         );
                         if residual_dialogue.is_some() {
                             break;
@@ -219,35 +264,47 @@ impl Pdf2Exporter {
                     }
                     Element::DualDialogue(dialogue0, dialogue1) => {
                         let mut initial_line_index = line_index;
-                        write_dialogue(
-                            dialogue0,
-                            &mut residual_dual_dialogue.0,
-                            &mut residual_index,
-                            size,
-                            max_lines,
-                            &mut line_index,
-                            &mut surface,
-                            fonts,
-                        );
-                        write_dialogue(
-                            dialogue1,
-                            &mut residual_dual_dialogue.1,
-                            &mut residual_index,
-                            size,
-                            max_lines,
-                            &mut initial_line_index,
-                            &mut surface,
-                            fonts,
-                        );
+                        if (residual_dual_dialogue.0.is_none()
+                            && residual_dual_dialogue.1.is_none())
+                            || residual_dual_dialogue.0.is_some()
+                        {
+                            write_dialogue(
+                                dialogue0,
+                                &mut residual_dual_dialogue.0,
+                                &mut residual_dual_index.0,
+                                size,
+                                max_lines,
+                                &mut line_index,
+                                &mut surface,
+                                fonts,
+                                &MARGINS.dual_dialogue.left,
+                            );
+                        }
+                        if (residual_dual_dialogue.1.is_none()
+                            && residual_dual_dialogue.0.is_none())
+                            || residual_dual_dialogue.1.is_some()
+                        {
+                            write_dialogue(
+                                dialogue1,
+                                &mut residual_dual_dialogue.1,
+                                &mut residual_dual_index.1,
+                                size,
+                                max_lines,
+                                &mut initial_line_index,
+                                &mut surface,
+                                fonts,
+                                &MARGINS.dual_dialogue.right,
+                            );
+                        }
                         line_index = line_index.max(initial_line_index);
                         if residual_dual_dialogue.0.is_some() || residual_dual_dialogue.1.is_some()
                         {
                             break;
                         }
                     }
-                    Element::Lyrics(s) => we(s, MARGINS.lyrics, Alignment::RightToLeft),
-                    Element::Transition(s) => we(s, MARGINS.transition, Alignment::RightToLeft),
-                    Element::CenteredText(s) => we(s, MARGINS.centered, Alignment::Centered),
+                    Element::Lyrics(s) => we(s, &MARGINS.lyrics, Alignment::RightToLeft),
+                    Element::Transition(s) => we(s, &MARGINS.transition, Alignment::RightToLeft),
+                    Element::CenteredText(s) => we(s, &MARGINS.centered, Alignment::Centered),
                     Element::Synopsis(s) => {
                         if self.synopses {
                             surface.set_fill(Some(Fill {
@@ -258,7 +315,7 @@ impl Pdf2Exporter {
                             write_element(
                                 size,
                                 s,
-                                MARGINS.synopsis,
+                                &MARGINS.synopsis,
                                 &mut breakpoint_index,
                                 &mut line_index,
                                 max_lines,
@@ -294,6 +351,7 @@ fn write_dialogue(
     line_index: &mut usize,
     surface: &mut Surface,
     fonts: &Fonts,
+    dialogue_margins: &DialogueMargins,
 ) {
     let mut character_name = dialogue.character.clone();
     match (*residual_dialogue, &dialogue.extension) {
@@ -307,17 +365,21 @@ fn write_dialogue(
         }
         _ => (),
     };
-    let span = glyph_span(size, MARGINS.character.left, MARGINS.character.right);
+    let span = glyph_span(
+        size,
+        dialogue_margins.character.left,
+        dialogue_margins.character.right,
+    );
     let name_lines_count = break_points(&character_name, span).len() + 1;
     if *line_index + name_lines_count + 1 >= max_lines {
         return;
     }
     assert!(name_lines_count < max_lines);
 
-    *residual_index = write_element(
+    write_element(
         size,
         &character_name,
-        MARGINS.character,
+        &dialogue_margins.character,
         &mut 0,
         line_index,
         max_lines,
@@ -333,7 +395,7 @@ fn write_dialogue(
             write_element(
                 size,
                 &"(MORE)".into(),
-                MARGINS.character,
+                &dialogue_margins.character,
                 &mut 0,
                 line_index,
                 max_lines + 1,
@@ -357,7 +419,7 @@ fn write_dialogue(
                 *residual_index = write_element(
                     size,
                     &s,
-                    MARGINS.parenthetical,
+                    &dialogue_margins.parenthetical,
                     &mut breakpoint_index,
                     line_index,
                     max_lines,
@@ -370,7 +432,7 @@ fn write_dialogue(
                 *residual_index = write_element(
                     size,
                     &s,
-                    MARGINS.dialogue,
+                    &dialogue_margins.line,
                     &mut breakpoint_index,
                     line_index,
                     max_lines,
@@ -394,7 +456,7 @@ fn write_dialogue(
 fn write_element(
     size: &PaperSize,
     content: &RichString,
-    margin: Margin,
+    margin: &Margin,
     breakpoint_index: &mut usize,
     line_index: &mut usize,
     max_lines: usize,
