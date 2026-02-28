@@ -135,7 +135,7 @@ const MARGINS: Margins = Margins {
         right: 144.0,
     },
     transition: Margin {
-        left: 396.0,
+        left: 144.0,
         right: 144.0,
     },
     centered: Margin {
@@ -257,9 +257,38 @@ impl Pdf2Exporter {
                         if number.is_some() {
                             let initial_line_index = line_index;
 
-                            let left_number_margin = Margin { left: 54.0, right: size.x as  };
+                            let left_number_margin = Margin {
+                                left: 54.0,
+                                right: size.x as f32 - MARGINS.heading.left + 18.0,
+                            };
+                            let right_number_margin = Margin {
+                                left: size.x as f32 - MARGINS.heading.right + 18.0,
+                                right: 18.0,
+                            };
 
-                            line_index = initial_line_index;
+                            write_element(
+                                size,
+                                &number.as_ref().unwrap().into(),
+                                &left_number_margin,
+                                &mut 0,
+                                &mut initial_line_index.clone(),
+                                max_lines,
+                                &mut surface,
+                                fonts,
+                                Alignment::LeftToRight,
+                            );
+
+                            write_element(
+                                size,
+                                &number.as_ref().unwrap().into(),
+                                &right_number_margin,
+                                &mut 0,
+                                &mut initial_line_index.clone(),
+                                max_lines,
+                                &mut surface,
+                                fonts,
+                                Alignment::RightToLeft,
+                            );
                         }
                         outline.push_child(OutlineNode::new(
                             slug.to_string(),
@@ -528,6 +557,7 @@ fn write_element(
             fonts,
             text_direction,
             size,
+            margin,
         );
         *breakpoint_index += 1;
         *line_index += 1;
@@ -545,6 +575,7 @@ fn write_line(
     fonts: &Fonts,
     text_direction: Alignment,
     size: &PaperSize,
+    margin: &Margin,
 ) {
     match content.get_char(start_index) {
         Some(c) => {
@@ -560,10 +591,18 @@ fn write_line(
         None => content.len(),
     };
 
-    if &text_direction == &Alignment::Centered {
-        let line_length = breakpoint_index - start_index;
-        let line_span = (line_length / 2) as f32 * FONT_WIDTH;
-        x = (size.x / 2) as f32 - line_span;
+    match text_direction {
+        Alignment::LeftToRight => (),
+        Alignment::RightToLeft => {
+            let line_length = breakpoint_index - start_index;
+            let line_span = line_length as f32 * FONT_WIDTH;
+            x += size.x as f32 - (margin.left + margin.right) - line_span;
+        }
+        Alignment::Centered => {
+            let line_length = breakpoint_index - start_index;
+            let line_span = (line_length / 2) as f32 * FONT_WIDTH;
+            x = (size.x / 2) as f32 - line_span;
+        }
     }
 
     let mut glyph_index = 0;
@@ -594,19 +633,13 @@ fn write_line(
             None => string_element.text.len(),
         };
 
-        let td = match &text_direction {
-            &Alignment::RightToLeft => krilla::text::TextDirection::RightToLeft,
-            &Alignment::LeftToRight => krilla::text::TextDirection::LeftToRight,
-            &Alignment::Centered => krilla::text::TextDirection::LeftToRight,
-        };
-
         surface.draw_text(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
             font.clone(),
             FONT_SIZE as f32,
             &string_element.text[start_byte_index..end_byte_index],
             false,
-            td,
+            krilla::text::TextDirection::LeftToRight,
         );
 
         glyph_index += relative_break_index - relative_index;
