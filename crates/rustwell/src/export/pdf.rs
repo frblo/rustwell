@@ -203,7 +203,7 @@ impl PdfExporter {
     ) {
         let mut screenplay_element_idx = 0;
 
-        let mut page_index = 0;
+        let mut page_idx = 0;
 
         let max_lines_per_page = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
         let mut residual_breakpoint_idx = None;
@@ -230,7 +230,7 @@ impl PdfExporter {
                 }
 
                 let element = &screenplay.elements[screenplay_element_idx];
-                let mut breakpoint_index = match residual_breakpoint_idx {
+                let mut breakpoint_idx = match residual_breakpoint_idx {
                     Some(i) => {
                         residual_breakpoint_idx = None;
                         i
@@ -243,7 +243,7 @@ impl PdfExporter {
                         size,
                         content,
                         margin,
-                        &mut breakpoint_index,
+                        &mut breakpoint_idx,
                         &mut line_idx,
                         max_lines_per_page,
                         &mut surface,
@@ -266,9 +266,11 @@ impl PdfExporter {
                                 right: 18.0,
                             };
 
+                            let rich_number = &number.as_ref().unwrap().into();
+
                             write_element(
                                 size,
-                                &number.as_ref().unwrap().into(),
+                                &rich_number,
                                 &left_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
@@ -280,7 +282,7 @@ impl PdfExporter {
 
                             write_element(
                                 size,
-                                &number.as_ref().unwrap().into(),
+                                &rich_number,
                                 &right_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
@@ -293,7 +295,7 @@ impl PdfExporter {
                         outline.push_child(OutlineNode::new(
                             slug.to_string(),
                             XyzDestination::new(
-                                page_index,
+                                page_idx,
                                 Point {
                                     x: MARGINS.heading.left,
                                     y: (TOP_MARGIN + (line_idx * FONT_SIZE) - FONT_SIZE) as f32,
@@ -304,7 +306,7 @@ impl PdfExporter {
                             size,
                             slug,
                             &MARGINS.heading,
-                            &mut breakpoint_index,
+                            &mut breakpoint_idx,
                             &mut line_idx,
                             max_lines_per_page,
                             &mut surface,
@@ -384,7 +386,7 @@ impl PdfExporter {
                                 size,
                                 s,
                                 &MARGINS.synopsis,
-                                &mut breakpoint_index,
+                                &mut breakpoint_idx,
                                 &mut line_idx,
                                 max_lines_per_page,
                                 &mut surface,
@@ -406,7 +408,7 @@ impl PdfExporter {
 
             surface.finish();
             page.finish();
-            page_index += 1;
+            page_idx += 1;
         }
         document.set_outline(outline);
     }
