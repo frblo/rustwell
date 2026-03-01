@@ -14,5 +14,3 @@ path = "src/lib.rs"
 [dependencies]
 bitflags = "2"
 krilla = "0.6.0"
-typst = "0.14.2"
-typst-pdf = "0.14.2"

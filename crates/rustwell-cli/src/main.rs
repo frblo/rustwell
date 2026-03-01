@@ -4,9 +4,8 @@ use color_eyre::eyre::bail;
 use rustwell::Exporter;
 use rustwell::ExporterExt;
 use rustwell::HtmlExporter;
-use rustwell::Pdf2Exporter;
+use rustwell::PdfExporter;
 use rustwell::Screenplay;
-use rustwell::TypstExporter;
 
 use std::fs::File;
 use std::io;
@@ -39,7 +38,6 @@ struct Cli {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum Target {
-    Typst,
     Html,
     Pdf,
 }
@@ -74,11 +72,7 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
             synopses: cli.synopses,
             ..Default::default()
         }),
-        Target::Pdf => Box::new(Pdf2Exporter {
-            synopses: cli.synopses,
-            ..Default::default()
-        }),
-        Target::Typst => Box::new(TypstExporter {
+        Target::Pdf => Box::new(PdfExporter {
             synopses: cli.synopses,
             ..Default::default()
         }),
@@ -111,7 +105,6 @@ fn detect_target_from_path(path: &str) -> Result<Target> {
         .to_ascii_lowercase();
 
     let t = match ext.as_str() {
-        "typ" => Target::Typst,
         "html" | "htm" => Target::Html,
         "pdf" => Target::Pdf,
         _ => bail!("unkown extension '.{}'; specify -t/--target", ext),
