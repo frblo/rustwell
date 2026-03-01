@@ -201,51 +201,51 @@ impl Pdf2Exporter {
         screenplay: &Screenplay,
         fonts: &Fonts,
     ) {
-        let mut screenplay_index = 0;
+        let mut screenplay_element_idx = 0;
 
         let mut page_index = 0;
 
-        let max_lines = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
-        let mut residual_index = None;
-        let mut residual_dialogue = None;
+        let max_lines_per_page = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
+        let mut residual_breakpoint_idx = None;
+        let mut residual_dialogue_idx = None;
 
-        let mut residual_dual_dialogue = (None, None);
-        let mut residual_dual_index = (None, None);
+        let mut residual_dual_dialogue_idx = (None, None);
+        let mut residual_dual_breakpoint_idx = (None, None);
 
         let mut outline = Outline::new();
 
-        while screenplay_index < screenplay.elements.len() {
+        while screenplay_element_idx < screenplay.elements.len() {
             let mut page = document
                 .start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
             let mut surface = page.surface();
-            let mut line_index = 0;
+            let mut line_idx = 0;
 
             loop {
-                if line_index >= max_lines {
+                if line_idx >= max_lines_per_page {
                     break;
                 }
 
-                if screenplay_index >= screenplay.elements.len() {
+                if screenplay_element_idx >= screenplay.elements.len() {
                     break;
                 }
 
-                let element = &screenplay.elements[screenplay_index];
-                let mut breakpoint_index = match residual_index {
+                let element = &screenplay.elements[screenplay_element_idx];
+                let mut breakpoint_index = match residual_breakpoint_idx {
                     Some(i) => {
-                        residual_index = None;
+                        residual_breakpoint_idx = None;
                         i
                     }
                     None => 0,
                 };
 
                 let mut we = |content, margin, text_direction| {
-                    residual_index = write_element(
+                    residual_breakpoint_idx = write_element(
                         size,
                         content,
                         margin,
                         &mut breakpoint_index,
-                        &mut line_index,
-                        max_lines,
+                        &mut line_idx,
+                        max_lines_per_page,
                         &mut surface,
                         fonts,
                         text_direction,
@@ -255,7 +255,7 @@ impl Pdf2Exporter {
                 match &element {
                     Element::Heading { slug, number } => {
                         if number.is_some() {
-                            let initial_line_index = line_index;
+                            let initial_line_index = line_idx;
 
                             let left_number_margin = Margin {
                                 left: 54.0,
@@ -272,7 +272,7 @@ impl Pdf2Exporter {
                                 &left_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
-                                max_lines,
+                                max_lines_per_page,
                                 &mut surface,
                                 fonts,
                                 Alignment::LeftToRight,
@@ -284,7 +284,7 @@ impl Pdf2Exporter {
                                 &right_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
-                                max_lines,
+                                max_lines_per_page,
                                 &mut surface,
                                 fonts,
                                 Alignment::RightToLeft,
@@ -296,17 +296,17 @@ impl Pdf2Exporter {
                                 page_index,
                                 Point {
                                     x: MARGINS.heading.left,
-                                    y: (TOP_MARGIN + (line_index * FONT_SIZE) - FONT_SIZE) as f32,
+                                    y: (TOP_MARGIN + (line_idx * FONT_SIZE) - FONT_SIZE) as f32,
                                 },
                             ),
                         ));
-                        residual_index = write_element(
+                        residual_breakpoint_idx = write_element(
                             size,
                             slug,
                             &MARGINS.heading,
                             &mut breakpoint_index,
-                            &mut line_index,
-                            max_lines,
+                            &mut line_idx,
+                            max_lines_per_page,
                             &mut surface,
                             fonts,
                             Alignment::LeftToRight,
@@ -316,55 +316,56 @@ impl Pdf2Exporter {
                     Element::Dialogue(dialogue) => {
                         write_dialogue(
                             dialogue,
-                            &mut residual_dialogue,
-                            &mut residual_index,
+                            &mut residual_dialogue_idx,
+                            &mut residual_breakpoint_idx,
                             size,
-                            max_lines,
-                            &mut line_index,
+                            max_lines_per_page,
+                            &mut line_idx,
                             &mut surface,
                             fonts,
                             &MARGINS.dialogue,
                         );
-                        if residual_dialogue.is_some() {
+                        if residual_dialogue_idx.is_some() {
                             break;
                         }
                     }
                     Element::DualDialogue(dialogue0, dialogue1) => {
-                        let mut initial_line_index = line_index;
-                        if (residual_dual_dialogue.0.is_none()
-                            && residual_dual_dialogue.1.is_none())
-                            || residual_dual_dialogue.0.is_some()
+                        let mut initial_line_index = line_idx;
+                        if (residual_dual_dialogue_idx.0.is_none()
+                            && residual_dual_dialogue_idx.1.is_none())
+                            || residual_dual_dialogue_idx.0.is_some()
                         {
                             write_dialogue(
                                 dialogue0,
-                                &mut residual_dual_dialogue.0,
-                                &mut residual_dual_index.0,
+                                &mut residual_dual_dialogue_idx.0,
+                                &mut residual_dual_breakpoint_idx.0,
                                 size,
-                                max_lines,
-                                &mut line_index,
+                                max_lines_per_page,
+                                &mut line_idx,
                                 &mut surface,
                                 fonts,
                                 &MARGINS.dual_dialogue.left,
                             );
                         }
-                        if (residual_dual_dialogue.1.is_none()
-                            && residual_dual_dialogue.0.is_none())
-                            || residual_dual_dialogue.1.is_some()
+                        if (residual_dual_dialogue_idx.1.is_none()
+                            && residual_dual_dialogue_idx.0.is_none())
+                            || residual_dual_dialogue_idx.1.is_some()
                         {
                             write_dialogue(
                                 dialogue1,
-                                &mut residual_dual_dialogue.1,
-                                &mut residual_dual_index.1,
+                                &mut residual_dual_dialogue_idx.1,
+                                &mut residual_dual_breakpoint_idx.1,
                                 size,
-                                max_lines,
+                                max_lines_per_page,
                                 &mut initial_line_index,
                                 &mut surface,
                                 fonts,
                                 &MARGINS.dual_dialogue.right,
                             );
                         }
-                        line_index = line_index.max(initial_line_index);
-                        if residual_dual_dialogue.0.is_some() || residual_dual_dialogue.1.is_some()
+                        line_idx = line_idx.max(initial_line_index);
+                        if residual_dual_dialogue_idx.0.is_some()
+                            || residual_dual_dialogue_idx.1.is_some()
                         {
                             break;
                         }
@@ -384,8 +385,8 @@ impl Pdf2Exporter {
                                 s,
                                 &MARGINS.synopsis,
                                 &mut breakpoint_index,
-                                &mut line_index,
-                                max_lines,
+                                &mut line_idx,
+                                max_lines_per_page,
                                 &mut surface,
                                 fonts,
                                 Alignment::LeftToRight,
@@ -394,13 +395,13 @@ impl Pdf2Exporter {
                         }
                     }
                     Element::PageBreak => {
-                        screenplay_index += 1;
+                        screenplay_element_idx += 1;
                         break;
                     }
                 }
 
-                line_index += 1;
-                screenplay_index += 1;
+                line_idx += 1;
+                screenplay_element_idx += 1;
             }
 
             surface.finish();
