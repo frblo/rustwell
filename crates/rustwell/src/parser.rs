@@ -990,7 +990,7 @@ The house [[ This is a note
 INT. HOUSE
 
 The house [[This is a note
-
+  
                 and should not be parsed
 , you understand?]]is empty.";
 
