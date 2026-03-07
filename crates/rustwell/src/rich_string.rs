@@ -59,23 +59,25 @@ impl RichString {
     /// multiple elements with different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
         let s = str.as_ref();
-        let bytes = s.as_bytes();
+        let mut chars = s.chars().peekable();
 
         let mut buf = String::new();
         let mut attrs = Attributes::empty();
 
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'*' => {
-                    if !buf.is_empty() {
-                        self.push_run(std::mem::take(&mut buf), attrs);
-                    }
+        let mut flush = |this: &mut Self, buf: &mut String, attrs: Attributes| {
+            if !buf.is_empty() {
+                this.push_run(std::mem::take(buf), attrs);
+            }
+        };
 
-                    let mut count = 0;
-                    while i < bytes.len() && bytes[i] == b'*' && count < 3 {
+        while let Some(ch) = chars.next() {
+            match ch {
+                '*' => {
+                    flush(self, &mut buf, attrs);
+                    let mut count = 1;
+                    while count < 3 && chars.peek() == Some(&'*') {
+                        chars.next();
                         count += 1;
-                        i += 1;
                     }
                     match count {
                         1 => attrs ^= Attributes::ITALIC,
@@ -84,41 +86,24 @@ impl RichString {
                         _ => unreachable!("Count can't be increased further than 3"),
                     }
                 }
-                b'_' => {
-                    if !buf.is_empty() {
-                        self.push_run(std::mem::take(&mut buf), attrs);
-                    }
+                '_' => {
+                    flush(self, &mut buf, attrs);
                     attrs ^= Attributes::UNDERLINE;
-                    i += 1;
                 }
-                b'\n' => {
-                    if !buf.is_empty() {
-                        self.push_run(std::mem::take(&mut buf), attrs);
-                    }
+                '\n' => {
+                    flush(self, &mut buf, attrs);
                     attrs = Attributes::empty();
                     self.push_run('\n'.to_string(), Attributes::empty());
-                    i += 1;
                 }
-                b'\\' => {
-                    let back_slash = s[i..].chars().next().expect("Should be a valid charpoint");
-                    i += back_slash.len_utf8();
-                    // Discard the \
-
-                    // Push the next char
-                    let ch = s[i..].chars().next().expect("Should be a valid charpoint");
-                    buf.push(ch);
-                    i += ch.len_utf8();
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        buf.push(next);
+                    }
                 }
-                _ => {
-                    let ch = s[i..].chars().next().expect("Should be a valid charpoint");
-                    buf.push(ch);
-                    i += ch.len_utf8();
-                }
+                _ => buf.push(ch),
             }
         }
-        if !buf.is_empty() {
-            self.push_run(std::mem::take(&mut buf), attrs);
-        }
+        flush(self, &mut buf, attrs);
     }
 
     fn push_run(&mut self, text: String, attributes: Attributes) {
