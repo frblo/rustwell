@@ -1,4 +1,4 @@
-//! This module implements a [RichString], meaning a *rich* string which can have multiple
+//! This module implements a [`RichString`], meaning a *rich* string which can have multiple
 //! attributes for style, and can have these on different parts of the same string.
 //!
 //! # Examples
@@ -19,8 +19,8 @@ use bitflags::bitflags;
 /// A string that can have different parts styled.
 ///
 /// New lines will always appear as their own non styled element.
-/// The [RichString] is comprised of a collection of [Element]s that each hold a [String] and a
-/// combination of stylings. The available styles are:
+/// The [`RichString`] is comprised of a collection of [Element]s that each
+/// hold a [String] and a combination of stylings. The available styles are:
 ///
 /// - `**bold**` → **bold**
 /// - `*italic*` → *italic*
@@ -48,15 +48,15 @@ pub struct RichString {
 }
 
 impl RichString {
-    /// Create a new, empty, [RichString].
+    /// Create a new, empty, [`RichString`].
     pub fn new() -> Self {
         RichString {
             elements: Vec::new(),
         }
     }
 
-    /// Pushes a string onto the [RichString]. Will divide the string into multiple elements with
-    /// different styles if input string can be parsed with styles.
+    /// Pushes a string onto the [`RichString`]. Will divide the string into
+    /// multiple elements with different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
         let s = str.as_ref();
         let bytes = s.as_bytes();
@@ -154,7 +154,7 @@ where
     }
 }
 
-/// A [RichString] component, containing a [String] and the style attributes
+/// A [`RichString`] component, containing a [String] and the style attributes
 /// belonging to said string.
 #[derive(Debug, PartialEq, Eq, Clone, Default, Hash)]
 pub struct Element {

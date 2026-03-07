@@ -72,15 +72,12 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
         Target::Html => Box::new(HtmlExporter {
             standalone: true,
             synopses: cli.synopses,
-            ..Default::default()
         }),
         Target::Pdf => Box::new(PdfExporter {
             synopses: cli.synopses,
-            ..Default::default()
         }),
         Target::Typst => Box::new(TypstExporter {
             synopses: cli.synopses,
-            ..Default::default()
         }),
     }
 }

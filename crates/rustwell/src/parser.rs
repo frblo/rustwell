@@ -136,7 +136,7 @@ impl<'a> Parser<'a> {
     fn try_section(&mut self, line: &str) -> bool {
         self.try_(
             line,
-            |_, s| s.trim_start().starts_with("#").then_some(s),
+            |_, s| s.trim_start().starts_with('#').then_some(s),
             |_, _| {},
         )
     }
@@ -303,8 +303,8 @@ impl<'a> Parser<'a> {
     }
 
     fn get_last_dialogue(&mut self) -> Option<&mut Dialogue> {
-        let (Some(Element::Dialogue(curr_dialogue))
-        | Some(Element::DualDialogue(_, curr_dialogue))) = self.elements.last_mut()
+        let Some(Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue)) =
+            self.elements.last_mut()
         else {
             return None;
         };
@@ -990,7 +990,7 @@ The house [[ This is a note
 INT. HOUSE
 
 The house [[This is a note
-  
+
                 and should not be parsed
 , you understand?]]is empty.";
 

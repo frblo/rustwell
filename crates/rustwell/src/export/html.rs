@@ -31,7 +31,7 @@ impl Exporter for HtmlExporter {
 
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
         if self.standalone {
-            writeln!(writer, r#"<!DOCTYPE html><html>{}"#, Self::export_head())?;
+            writeln!(writer, r"<!DOCTYPE html><html>{}", Self::export_head())?;
         }
 
         writeln!(writer, r#"<body><div id="wrapper" class="screenplay">"#)?;
@@ -56,12 +56,11 @@ impl HtmlExporter {
         format!(
             r#"<head>
             <title>Screenplay</title>
-            <style type="text/css">{}</style></head>"#,
-            CSS
+            <style type="text/css">{CSS}</style></head>"#,
         )
     }
 
-    /// Exports the [TitlePage] to a `html` string.
+    /// Exports the [`TitlePage`] to a `html` string.
     fn export_titlepage(&self, titlepage: &TitlePage) -> String {
         format!(
             r#"
@@ -83,12 +82,13 @@ impl HtmlExporter {
         )
     }
 
-    /// Exports the [TitlePage] element, meaning one of values that can be included
-    /// on the [TitlePage] to a `html` string. If there are no [RichString]s we do not include
-    /// the value on the [TitlePage], and only return `""` here.
+    /// Exports the [`TitlePage`] element, meaning one of values that can be included
+    /// on the [`TitlePage`] to a `html` string. If there are no [`RichString`]s
+    /// we do not include the value on the [`TitlePage`],
+    /// and only return `""` here.
     fn export_titlepage_element(&self, value: &str, element: &[RichString]) -> String {
         if element.is_empty() {
-            return "".to_string();
+            return String::new();
         }
 
         let content = element
@@ -97,7 +97,7 @@ impl HtmlExporter {
             .collect::<Vec<String>>()
             .concat();
 
-        format!(r#"<div class="{}">{}</div>"#, value, content)
+        format!(r#"<div class="{value}">{content}</div>"#)
     }
 
     /// Formats an [Element] into a `html`-[String].
@@ -105,17 +105,17 @@ impl HtmlExporter {
         match element {
             Element::Heading { slug, number } => {
                 format!(
-                    r#"<h6>{}{}{}</h6>"#,
+                    r"<h6>{}{}{}</h6>",
                     if let Some(x) = number {
-                        format!(r#"<span class="scnuml">{}</span>"#, x)
+                        format!(r#"<span class="scnuml">{x}</span>"#)
                     } else {
-                        "".to_string()
+                        String::new()
                     },
                     self.format_rich_string(slug),
                     if let Some(x) = number {
-                        format!(r#"<span class="scnumr">{}</span>"#, x)
+                        format!(r#"<span class="scnumr">{x}</span>"#)
                     } else {
-                        "".to_string()
+                        String::new()
                     },
                 )
             }
@@ -165,10 +165,10 @@ impl HtmlExporter {
                         self.format_rich_string(s)
                     )
                 } else {
-                    "".to_string()
+                    String::new()
                 }
             }
-            Element::PageBreak => "".to_string(), // No pagebreaks in html
+            Element::PageBreak => String::new(), // No pagebreaks in html
         }
     }
 
@@ -184,7 +184,7 @@ impl HtmlExporter {
         }
     }
 
-    /// Formats a [RichString] into a `html`-[String].
+    /// Formats a [`RichString`] into a `html`-[String].
     fn format_rich_string(&self, str: &RichString) -> String {
         str.elements
             .iter()
@@ -193,7 +193,7 @@ impl HtmlExporter {
             .concat()
     }
 
-    /// Formats a [RichString] [rich_string::Element] into a `html`-[String].
+    /// Formats a [`RichString`] [`rich_string::Element`] into a `html`-[String].
     fn format_rich_element(&self, element: &rich_string::Element) -> String {
         // Assumes newlines '\n' will only occur sole elements
         if element.text == "\n" {
@@ -216,7 +216,7 @@ impl HtmlExporter {
     }
 
     /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
-    /// [DialogueElement]s.
+    /// [`DialogueElement`]s.
     fn format_dialogue(&self, dialogue: &[DialogueElement]) -> String {
         dialogue
             .iter()
@@ -225,7 +225,7 @@ impl HtmlExporter {
             .join("\n")
     }
 
-    /// Formats a [DialogueElement] into a `html`-[String].
+    /// Formats a [`DialogueElement`] into a `html`-[String].
     fn format_dialogue_element(&self, element: &DialogueElement) -> String {
         match element {
             DialogueElement::Parenthetical(s) => {
@@ -234,7 +234,7 @@ impl HtmlExporter {
                     self.format_rich_string(s)
                 )
             }
-            DialogueElement::Line(s) => format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
+            DialogueElement::Line(s) => format!(r"<p>{}</p>", self.format_rich_string(s)),
         }
     }
 }
