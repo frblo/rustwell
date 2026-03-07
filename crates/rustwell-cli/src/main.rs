@@ -70,7 +70,7 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
     let target = decide_target(cli);
     match target {
         Target::Html => Box::new(HtmlExporter {
-            css: true,
+            standalone: true,
             synopses: cli.synopses,
             ..Default::default()
         }),

@@ -14,8 +14,12 @@ const CSS: &str = include_str!("style.css");
 /// The variables configure the exporter
 #[derive(Default)]
 pub struct HtmlExporter {
-    /// If `css` styling should be included in the output
-    pub css: bool,
+    /// Decides if output should be standalone or if only the inner html
+    /// should be produced.
+    ///
+    /// By standalone is meant that the output includes !DOCTYPE, <html> tags,
+    /// and <head> tags,
+    pub standalone: bool,
     /// If synopses should be included in the output
     pub synopses: bool,
 }
@@ -26,40 +30,37 @@ impl Exporter for HtmlExporter {
     }
 
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
-        writeln!(
-            writer,
-            r#"<!DOCTYPE html>
-<html>
-    <head>
-        <title>Screenplay</title>
-        {}
-    </head>
-    <body>
-        <div id="wrapper" class="screenplay">"#,
-            if self.css {
-                format!(r#"<style type="text/css">{}</style>"#, CSS)
-            } else {
-                "".to_string()
-            }
-        )?;
+        if self.standalone {
+            writeln!(writer, r#"<!DOCTYPE html><html>{}"#, Self::export_head())?;
+        }
+
+        writeln!(writer, r#"<body><div id="wrapper" class="screenplay">"#)?;
         if let Some(titlepage) = &screenplay.titlepage {
             writeln!(writer, "{}", self.export_titlepage(titlepage))?;
         }
         for e in &screenplay.elements {
             writeln!(writer, "{}", self.export_element(e))?;
         }
-        writeln!(
-            writer,
-            r#"</div>
-        </body>
-    </html>"#
-        )?;
+        writeln!(writer, "</div></body>")?;
 
+        if self.standalone {
+            writeln!(writer, "</html>")?;
+        }
         Ok(())
     }
 }
 
 impl HtmlExporter {
+    /// Exports only the head for the `html` output.
+    pub fn export_head() -> String {
+        format!(
+            r#"<head>
+            <title>Screenplay</title>
+            <style type="text/css">{}</style></head>"#,
+            CSS
+        )
+    }
+
     /// Exports the [TitlePage] to a `html` string.
     fn export_titlepage(&self, titlepage: &TitlePage) -> String {
         format!(
