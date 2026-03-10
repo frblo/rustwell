@@ -25,77 +25,61 @@ use crate::Screenplay;
 /// Types Implementing this trait provide logic for exporting a [`Screenplay`]
 /// to some format.
 pub trait Exporter {
+    /// Returns the file extension for this exporter's output format,
+    /// e.g. `"html"`.
     fn file_extension(&self) -> &'static str;
 
+    /// Exports the screenplay to the given writer.
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> Result<()>;
 }
 
 /// An extension trait for [`Exporter`] providing common functionality.
 ///
 /// There is a blanket implementation so any type implementing [`Exporter`] also
-/// implements this trait.
+/// implements this trait, including `dyn Exporter`.
 ///
-/// Bring it into scope to get acess to the functions
+/// # Usage
+/// This trait must be in scope to use its methods:
+/// ```
+/// use rustwell::ExporterExt;
+/// ```
 pub trait ExporterExt: Exporter {
+    /// Exports the screenplay to stdout.
     fn export_to_stdout(&self, screenplay: &Screenplay) -> Result<()> {
-        export_to_stdout(self, screenplay)
+        let stdout = std::io::stdout();
+        let mut lock = stdout.lock();
+        self.export(screenplay, &mut lock)
     }
 
+    /// Exports the screenplay to a file at the given path.
     fn export_to_file(&self, screenplay: &Screenplay, path: impl AsRef<Path>) -> Result<()> {
-        export_to_file(self, screenplay, path)
+        let file = File::create(path)?;
+        let mut w = BufWriter::new(file);
+
+        self.export(screenplay, &mut w)
     }
 
+    /// Exports the screenplay to `dir/base.ext` where `ext` is determined
+    /// by [`Exporter::file_extension`].
     fn export_with_extension(
         &self,
         screenplay: &Screenplay,
         dir: impl AsRef<Path>,
         base: &str,
     ) -> Result<()> {
-        export_with_extension(self, screenplay, dir, base)
+        let path = dir
+            .as_ref()
+            .join(base)
+            .with_extension(self.file_extension());
+        self.export_to_file(screenplay, &path)
+    }
+
+    /// Exports the screenplay to a [`String`] in memory.
+    fn export_to_string(&self, screenplay: &Screenplay) -> Result<String> {
+        let mut buf = Vec::new();
+        self.export(screenplay, &mut buf)?;
+        Ok(String::from_utf8_lossy(&buf).into_owned())
     }
 }
 
 impl<T: Exporter + ?Sized> ExporterExt for T {}
-
-/// Exports a [`Screenplay`] to stdout using the provided [`Exporter`]
-pub fn export_to_stdout<E>(exporter: &E, screenplay: &Screenplay) -> Result<()>
-where
-    E: Exporter + ?Sized,
-{
-    let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
-    exporter.export(screenplay, &mut lock)
-}
-
-/// Exports a [`Screenplay`] to a specified file path using the provided [`Exporter`]
-pub fn export_to_file<E>(
-    exporter: &E,
-    screenplay: &Screenplay,
-    path: impl AsRef<Path>,
-) -> Result<()>
-where
-    E: Exporter + ?Sized,
-{
-    let file = File::create(path)?;
-    let mut w = BufWriter::new(file);
-
-    exporter.export(screenplay, &mut w)
-}
-
-/// Exports a [`Screenplay`] to the specified directory with the specified
-/// base using the file extension from the provided [`Exporter`].
-pub fn export_with_extension<E>(
-    exporter: &E,
-    screenplay: &Screenplay,
-    dir: impl AsRef<Path>,
-    base: &str,
-) -> Result<()>
-where
-    E: Exporter + ?Sized,
-{
-    let path = dir
-        .as_ref()
-        .join(base)
-        .with_extension(exporter.file_extension());
-    export_to_file(exporter, screenplay, &path)
-}

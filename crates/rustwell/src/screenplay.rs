@@ -22,13 +22,13 @@ impl Screenplay {
         }
     }
 
-    /// Set the [TitlePage] on a [Screenplay].
+    /// Set the [`TitlePage`] on a [`Screenplay`].
     pub fn set_titlepage(&mut self, titlepage: Option<TitlePage>) {
         self.titlepage = titlepage;
     }
 }
 
-/// The components of a [Screenplay], like scene headings, action, dialogue, etc.
+/// The components of a [`Screenplay`], like scene headings, action, dialogue, etc.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Element {
     Heading {
@@ -94,7 +94,7 @@ pub struct TitlePage {
 }
 
 impl TitlePage {
-    /// Creates a new empty [TitlePage].
+    /// Creates a new empty [`TitlePage`].
     pub fn new() -> Self {
         Self {
             title: Vec::new(),
