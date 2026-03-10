@@ -13,5 +13,6 @@ path = "src/lib.rs"
 
 [dependencies]
 bitflags = "2"
+unicode-properties = "0.1.4"
 typst = "0.14.2"
 typst-pdf = "0.14.2"

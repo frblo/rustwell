@@ -15,6 +15,7 @@
 //! ```
 
 use bitflags::bitflags;
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 /// A string that can have different parts styled.
 ///
@@ -120,6 +121,54 @@ impl RichString {
 
         self.elements.push(Element { text, attributes });
     }
+
+    fn tokenize(input: &str) -> (Vec<&str>, Vec<Delimiter>) {
+        let mut tokens = Vec::new();
+        let mut delimiters = Vec::new();
+
+        let mut chars = input.char_indices().peekable();
+        let mut start = 0;
+        let mut before = None;
+
+        while let Some((i, ch)) = chars.next() {
+            match ch {
+                '*' => {
+                    if i > start {
+                        tokens.push(&input[start..i]);
+                    }
+
+                    let run_start = i;
+                    while chars.peek().map(|(_, c)| *c == '*').unwrap_or(false) {
+                        chars.next();
+                    }
+                    let run_end = chars.peek().map(|(i, _)| *i).unwrap_or(input.len());
+                    let after = chars.peek().map(|(_, c)| *c);
+                    let count = run_end - run_start;
+
+                    delimiters.push(Delimiter {
+                        char: '*',
+                        count,
+                        token_idx: tokens.len(),
+                        can_open: is_left_flanking(before, after),
+                        can_close: is_right_flanking(before, after),
+                    });
+
+                    tokens.push(&input[run_start..run_end]);
+                    before = Some('*');
+                    start = run_end;
+                }
+                '_' => todo!(),
+                '\\' => {
+                    if let Some((_, next)) = chars.next() {
+                        before = Some(next);
+                    }
+                }
+                _ => before = Some(ch),
+            }
+        }
+
+        (tokens, delimiters)
+    }
 }
 
 impl Default for RichString {
@@ -183,16 +232,60 @@ bitflags! {
     }
 }
 
+#[derive(Debug)]
+struct Delimiter {
+    char: char,
+    count: usize,
+    token_idx: usize,
+    can_open: bool,
+    can_close: bool,
+}
+
+fn is_left_flanking(before: Option<char>, after: Option<char>) -> bool {
+    match after {
+        None => false,
+        Some(a) if is_whitespace(a) => false,
+        Some(a) if is_punctuation(a) => match before {
+            None => true,
+            Some(b) if is_whitespace(b) || is_punctuation(b) => true,
+            _ => false,
+        },
+        _ => true,
+    }
+}
+
+fn is_right_flanking(before: Option<char>, after: Option<char>) -> bool {
+    // right-flanking delimiter run is checked the same way as a left-flanking
+    // but going from the other direction.
+    is_left_flanking(after, before)
+}
+
+fn is_whitespace(char: char) -> bool {
+    match char {
+        '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{000D}' => true,
+        c => matches!(c.general_category_group(), GeneralCategoryGroup::Separator),
+    }
+}
+
+fn is_punctuation(char: char) -> bool {
+    matches!(
+        char.general_category_group(),
+        GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = (&'a str, Attributes)>) {
-        let rs = RichString::from(input);
-        for (elem, expected) in rs.elements.iter().zip(expected.into_iter()) {
-            assert_eq!(elem.text, expected.0);
-            assert_eq!(elem.attributes, expected.1);
-        }
+    const B: Attributes = Attributes::BOLD;
+    const I: Attributes = Attributes::ITALIC;
+    const U: Attributes = Attributes::UNDERLINE;
+    const E: Attributes = Attributes::empty();
+
+    #[test]
+    fn temp() {
+        println!("{:?}", RichString::tokenize("**a * foo** ********bar***"));
     }
 
     macro_rules! test_emphasis {
@@ -204,10 +297,13 @@ mod tests {
         };
     }
 
-    const B: Attributes = Attributes::BOLD;
-    const I: Attributes = Attributes::ITALIC;
-    const U: Attributes = Attributes::UNDERLINE;
-    const E: Attributes = Attributes::empty();
+    fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = (&'a str, Attributes)>) {
+        let rs = RichString::from(input);
+        for (elem, expected) in rs.elements.iter().zip(expected.into_iter()) {
+            assert_eq!(elem.text, expected.0);
+            assert_eq!(elem.attributes, expected.1);
+        }
+    }
 
     // Basic
     test_emphasis!(italic, "*foo bar*", [("foo bar", I)]);
