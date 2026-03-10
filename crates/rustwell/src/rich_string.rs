@@ -64,7 +64,7 @@ impl RichString {
         let mut buf = String::new();
         let mut attrs = Attributes::empty();
 
-        let mut flush = |this: &mut Self, buf: &mut String, attrs: Attributes| {
+        let flush = |this: &mut Self, buf: &mut String, attrs: Attributes| {
             if !buf.is_empty() {
                 this.push_run(std::mem::take(buf), attrs);
             }
@@ -187,65 +187,109 @@ bitflags! {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_bold() {
-        let mut rs = RichString::new();
-        rs.push_str("**text**");
-
-        assert!(rs.elements[0].is_bold());
-        assert_eq!(rs.elements[0].text, "text".to_string());
+    fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = (&'a str, Attributes)>) {
+        let rs = RichString::from(input);
+        for (elem, expected) in rs.elements.iter().zip(expected.into_iter()) {
+            assert_eq!(elem.text, expected.0);
+            assert_eq!(elem.attributes, expected.1);
+        }
     }
 
-    #[test]
-    fn parses_italic() {
-        let mut rs = RichString::new();
-        rs.push_str("*text*");
-
-        assert!(rs.elements[0].is_italic());
-        assert_eq!(rs.elements[0].text, "text".to_string());
+    macro_rules! test_emphasis {
+        ($name:ident, $input:expr, [$(($text:expr, $attrs:expr)),*]) => {
+            #[test]
+            fn $name() {
+            test_parse($input, [$(($text, $attrs)),*]);
+            }
+        };
     }
 
-    #[test]
-    fn parses_underline() {
-        let mut rs = RichString::new();
-        rs.push_str("_text_");
+    const B: Attributes = Attributes::BOLD;
+    const I: Attributes = Attributes::ITALIC;
+    const U: Attributes = Attributes::UNDERLINE;
+    const E: Attributes = Attributes::empty();
 
-        assert!(rs.elements[0].is_underline());
-        assert_eq!(rs.elements[0].text, "text".to_string());
-    }
+    // Basic
+    test_emphasis!(italic, "*foo bar*", [("foo bar", I)]);
+    test_emphasis!(bold, "**foo bar**", [("foo bar", B)]);
+    test_emphasis!(bold_italic, "***foo bar***", [("foo bar", B | I)]);
+    test_emphasis!(underline, "_foo bar_", [("foo bar", U)]);
 
-    #[test]
-    fn parses_overlapping_styles() {
-        let mut rs = RichString::new();
-        rs.push_str("t_e**x**t_");
+    // Non left-flanking delimiter run not opening
+    test_emphasis!(
+        not_open_because_whitespace_after_delimiter,
+        "* foo bar*",
+        [("* foo bar*", E)]
+    );
+    test_emphasis!(
+        not_open_because_punctuation_after_delimiter_alphanumeric_before,
+        "a*.foo bar*",
+        [("a*.foo bar*", E)]
+    );
 
-        assert!(!rs.elements[0].is_bold());
-        assert!(!rs.elements[0].is_italic());
-        assert!(!rs.elements[0].is_underline());
-        assert_eq!(rs.elements[0].text, "t".to_string());
+    // Non right-flanking delimiter run not closing
+    test_emphasis!(
+        not_closed_because_whitespace_before_delimiter,
+        "*foo bar *",
+        [("*foo bar *", E)]
+    );
+    test_emphasis!(
+        not_closed_because_newline_before_delimiter,
+        "*foo bar\n*",
+        [("*foo bar\n*", E)]
+    );
+    test_emphasis!(
+        not_closed_because_punctuation_before_delimiter_alphanumeric_after,
+        "*(*foo)",
+        [("*(*foo)", E)]
+    );
 
-        assert!(!rs.elements[1].is_bold());
-        assert!(!rs.elements[1].is_italic());
-        assert!(rs.elements[1].is_underline());
-        assert_eq!(rs.elements[1].text, "e".to_string());
+    test_emphasis!(
+        closed_because_newline_then_alphanumeric_before_delimiter,
+        "*foo\nbar*",
+        [("foo\nbar", I)]
+    );
 
-        assert!(rs.elements[2].is_bold());
-        assert!(!rs.elements[2].is_italic());
-        assert!(rs.elements[2].is_underline());
-        assert_eq!(rs.elements[2].text, "x".to_string());
+    // Nested empgasis
+    test_emphasis!(
+        nested_bold_in_italics,
+        "*foo **bar** baz*",
+        [("foo ", I), ("bar", I | B), (" baz", I)]
+    );
+    test_emphasis!(
+        nested_bold_in_italics_no_whitepace,
+        "*foo**bar**baz*",
+        [("foo", I), ("bar", I | B), ("baz", I)]
+    );
+    test_emphasis!(
+        nested_bold_in_italics_complicated,
+        "*foo**bar***",
+        [("foo", I), ("bar", I | B)]
+    );
 
-        assert!(!rs.elements[3].is_bold());
-        assert!(!rs.elements[3].is_italic());
-        assert!(rs.elements[3].is_underline());
-        assert_eq!(rs.elements[3].text, "t".to_string());
-    }
+    // matching delimiter runs
+    test_emphasis!(no_empty_emphasis, "__foo", [("__foo", E)]);
+    test_emphasis!(
+        cant_close_when_sum_is_multiple_of_three_but_not_both_lengths_are_multiples_of_three,
+        "*foo**bar*",
+        [("foo**bar", I)]
+    );
+    test_emphasis!(
+        can_close_when_sum_is_multiple_of_three_and_both_lengths_are_multiples_of_three,
+        "foo***bar***baz",
+        [("foo", E), ("bar", I | B), ("baz", E)]
+    );
 
-    #[test]
-    fn parser_ignores_backslash() {
-        let mut rs = RichString::new();
-        rs.push_str(r#"\*text\*"#);
-
-        assert!(!rs.elements[0].is_italic());
-        assert_eq!(rs.elements[0].text, "*text*".to_string());
-    }
+    test_emphasis!(
+        literal_delimiter_cant_appear_at_begining_or_end_of_run,
+        "foo *** foo *\\**",
+        [("foo *** foo ", E), ("*", I)]
+    );
+    test_emphasis!(mismatch_more_before, "**foo*", [("*", E), ("foo", I)]);
+    test_emphasis!(mismatch_more_after, "*foo****", [("foo", I), ("***", E)]);
+    test_emphasis!(
+        two_potential_opening_share_same_closing_pick_shortest,
+        "**foo **bar baz**",
+        [("**foo ", E), ("bar baz", B)]
+    );
 }
