@@ -446,6 +446,13 @@ mod tests {
         test_emphasis!(bold_italic, "***foo bar***", [("foo bar", B | I)]);
         test_emphasis!(underline, "_foo bar_", [("foo bar", U)]);
 
+        // combinations
+        test_emphasis!(
+            overlapping_styles,
+            "**_foo** bar_",
+            [("foo", B | U), (" bar", U)]
+        );
+
         // Non left-flanking delimiter run not opening
         test_emphasis!(
             not_open_because_whitespace_after_delimiter,
