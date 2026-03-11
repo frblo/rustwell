@@ -132,13 +132,13 @@ impl RichString {
 
         while let Some((i, ch)) = chars.next() {
             match ch {
-                '*' => {
+                '*' | '_' => {
                     if i > start {
                         tokens.push(&input[start..i]);
                     }
 
                     let run_start = i;
-                    while chars.peek().map(|(_, c)| *c == '*').unwrap_or(false) {
+                    while chars.peek().map(|(_, c)| *c == ch).unwrap_or(false) {
                         chars.next();
                     }
                     let run_end = chars.peek().map(|(i, _)| *i).unwrap_or(input.len());
@@ -146,7 +146,7 @@ impl RichString {
                     let count = run_end - run_start;
 
                     delimiters.push(Delimiter {
-                        char: '*',
+                        char: ch,
                         count,
                         token_idx: tokens.len(),
                         can_open: is_left_flanking(before, after),
@@ -154,17 +154,24 @@ impl RichString {
                     });
 
                     tokens.push(&input[run_start..run_end]);
-                    before = Some('*');
+                    before = Some(ch);
                     start = run_end;
                 }
-                '_' => todo!(),
                 '\\' => {
-                    if let Some((_, next)) = chars.next() {
+                    if let Some((next_idx, next)) = chars.next() {
+                        if i > start {
+                            tokens.push(&input[start..i]);
+                        }
                         before = Some(next);
+                        start = next_idx;
                     }
                 }
                 _ => before = Some(ch),
             }
+        }
+
+        if start < input.len() {
+            tokens.push(&input[start..]);
         }
 
         (tokens, delimiters)
@@ -232,7 +239,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct Delimiter {
     char: char,
     count: usize,
@@ -278,114 +285,243 @@ fn is_punctuation(char: char) -> bool {
 mod tests {
     use super::*;
 
-    const B: Attributes = Attributes::BOLD;
-    const I: Attributes = Attributes::ITALIC;
-    const U: Attributes = Attributes::UNDERLINE;
-    const E: Attributes = Attributes::empty();
+    mod tokenize {
+        use super::*;
 
-    #[test]
-    fn temp() {
-        println!("{:?}", RichString::tokenize("**a * foo** ********bar***"));
-    }
+        #[test]
+        fn splits_at_delimiter_run() {
+            let (tokens, delimiter) = RichString::tokenize("* a _ b **");
+            let expected_tokens = vec!["*", " a ", "_", " b ", "**"];
+            let expected_delimiter = vec![
+                Delimiter {
+                    char: '*',
+                    count: 1,
+                    token_idx: 0,
+                    can_open: false,
+                    can_close: false,
+                },
+                Delimiter {
+                    char: '_',
+                    count: 1,
+                    token_idx: 2,
+                    can_open: false,
+                    can_close: false,
+                },
+                Delimiter {
+                    char: '*',
+                    count: 2,
+                    token_idx: 4,
+                    can_open: false,
+                    can_close: false,
+                },
+            ];
+            assert_eq!(tokens, expected_tokens);
+            assert_eq!(delimiter, expected_delimiter);
+        }
 
-    macro_rules! test_emphasis {
-        ($name:ident, $input:expr, [$(($text:expr, $attrs:expr)),*]) => {
-            #[test]
-            fn $name() {
-            test_parse($input, [$(($text, $attrs)),*]);
+        #[test]
+        fn left_flanking() {
+            // Can open
+            let (_, delimiter) = RichString::tokenize("**a");
+            assert!(
+                delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_open
+            );
+            let (_, delimiter) = RichString::tokenize("*.a");
+            assert!(
+                delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_open
+            );
+            let (_, delimiter) = RichString::tokenize(".*.a");
+            assert!(
+                delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_open
+            );
+
+            // Can't open
+            let (_, delimiter) = RichString::tokenize("* a");
+            assert!(
+                !delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_open
+            );
+            let (_, delimiter) = RichString::tokenize("a*.a");
+            assert!(
+                !delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_open
+            );
+        }
+
+        #[test]
+        fn right_flanking() {
+            // Can open
+            let (_, delimiter) = RichString::tokenize("a**");
+            assert!(
+                delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_close
+            );
+            let (_, delimiter) = RichString::tokenize("a.*");
+            assert!(
+                delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_close
+            );
+            let (_, delimiter) = RichString::tokenize("a.*.");
+            assert!(
+                delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_close
+            );
+
+            // Can't open
+            let (_, delimiter) = RichString::tokenize("a *");
+            assert!(
+                !delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_close
+            );
+            let (_, delimiter) = RichString::tokenize("a.*a");
+            assert!(
+                !delimiter
+                    .first()
+                    .expect("There should be a delimiter")
+                    .can_close
+            );
+        }
+
+        #[test]
+        fn dont_include_escape_character() {
+            let (tokens, delimiter) = RichString::tokenize("a\\*b");
+            // Doesn't create a delimiter run for the escaped character
+            assert!(delimiter.is_empty());
+            // The backslash isn't included as a token
+            for token in tokens {
+                assert!(!token.contains('\\'))
             }
-        };
-    }
-
-    fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = (&'a str, Attributes)>) {
-        let rs = RichString::from(input);
-        for (elem, expected) in rs.elements.iter().zip(expected.into_iter()) {
-            assert_eq!(elem.text, expected.0);
-            assert_eq!(elem.attributes, expected.1);
         }
     }
 
-    // Basic
-    test_emphasis!(italic, "*foo bar*", [("foo bar", I)]);
-    test_emphasis!(bold, "**foo bar**", [("foo bar", B)]);
-    test_emphasis!(bold_italic, "***foo bar***", [("foo bar", B | I)]);
-    test_emphasis!(underline, "_foo bar_", [("foo bar", U)]);
+    mod parse {
+        use super::*;
 
-    // Non left-flanking delimiter run not opening
-    test_emphasis!(
-        not_open_because_whitespace_after_delimiter,
-        "* foo bar*",
-        [("* foo bar*", E)]
-    );
-    test_emphasis!(
-        not_open_because_punctuation_after_delimiter_alphanumeric_before,
-        "a*.foo bar*",
-        [("a*.foo bar*", E)]
-    );
+        const B: Attributes = Attributes::BOLD;
+        const I: Attributes = Attributes::ITALIC;
+        const U: Attributes = Attributes::UNDERLINE;
+        const E: Attributes = Attributes::empty();
 
-    // Non right-flanking delimiter run not closing
-    test_emphasis!(
-        not_closed_because_whitespace_before_delimiter,
-        "*foo bar *",
-        [("*foo bar *", E)]
-    );
-    test_emphasis!(
-        not_closed_because_newline_before_delimiter,
-        "*foo bar\n*",
-        [("*foo bar\n*", E)]
-    );
-    test_emphasis!(
-        not_closed_because_punctuation_before_delimiter_alphanumeric_after,
-        "*(*foo)",
-        [("*(*foo)", E)]
-    );
+        macro_rules! test_emphasis {
+            ($name:ident, $input:expr, [$(($text:expr, $attrs:expr)),*]) => {
+                #[test]
+                fn $name() {
+                test_parse($input, [$(($text, $attrs)),*]);
+                }
+            };
+        }
 
-    test_emphasis!(
-        closed_because_newline_then_alphanumeric_before_delimiter,
-        "*foo\nbar*",
-        [("foo\nbar", I)]
-    );
+        fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = (&'a str, Attributes)>) {
+            let rs = RichString::from(input);
+            for (elem, expected) in rs.elements.iter().zip(expected.into_iter()) {
+                assert_eq!(elem.text, expected.0);
+                assert_eq!(elem.attributes, expected.1);
+            }
+        }
 
-    // Nested empgasis
-    test_emphasis!(
-        nested_bold_in_italics,
-        "*foo **bar** baz*",
-        [("foo ", I), ("bar", I | B), (" baz", I)]
-    );
-    test_emphasis!(
-        nested_bold_in_italics_no_whitepace,
-        "*foo**bar**baz*",
-        [("foo", I), ("bar", I | B), ("baz", I)]
-    );
-    test_emphasis!(
-        nested_bold_in_italics_complicated,
-        "*foo**bar***",
-        [("foo", I), ("bar", I | B)]
-    );
+        // Basic
+        test_emphasis!(italic, "*foo bar*", [("foo bar", I)]);
+        test_emphasis!(bold, "**foo bar**", [("foo bar", B)]);
+        test_emphasis!(bold_italic, "***foo bar***", [("foo bar", B | I)]);
+        test_emphasis!(underline, "_foo bar_", [("foo bar", U)]);
 
-    // matching delimiter runs
-    test_emphasis!(no_empty_emphasis, "__foo", [("__foo", E)]);
-    test_emphasis!(
-        cant_close_when_sum_is_multiple_of_three_but_not_both_lengths_are_multiples_of_three,
-        "*foo**bar*",
-        [("foo**bar", I)]
-    );
-    test_emphasis!(
-        can_close_when_sum_is_multiple_of_three_and_both_lengths_are_multiples_of_three,
-        "foo***bar***baz",
-        [("foo", E), ("bar", I | B), ("baz", E)]
-    );
+        // Non left-flanking delimiter run not opening
+        test_emphasis!(
+            not_open_because_whitespace_after_delimiter,
+            "* foo bar*",
+            [("* foo bar*", E)]
+        );
+        test_emphasis!(
+            not_open_because_punctuation_after_delimiter_alphanumeric_before,
+            "a*.foo bar*",
+            [("a*.foo bar*", E)]
+        );
 
-    test_emphasis!(
-        literal_delimiter_cant_appear_at_begining_or_end_of_run,
-        "foo *** foo *\\**",
-        [("foo *** foo ", E), ("*", I)]
-    );
-    test_emphasis!(mismatch_more_before, "**foo*", [("*", E), ("foo", I)]);
-    test_emphasis!(mismatch_more_after, "*foo****", [("foo", I), ("***", E)]);
-    test_emphasis!(
-        two_potential_opening_share_same_closing_pick_shortest,
-        "**foo **bar baz**",
-        [("**foo ", E), ("bar baz", B)]
-    );
+        // Non right-flanking delimiter run not closing
+        test_emphasis!(
+            not_closed_because_whitespace_before_delimiter,
+            "*foo bar *",
+            [("*foo bar *", E)]
+        );
+        test_emphasis!(
+            not_closed_because_newline_before_delimiter,
+            "*foo bar\n*",
+            [("*foo bar\n*", E)]
+        );
+        test_emphasis!(
+            not_closed_because_punctuation_before_delimiter_alphanumeric_after,
+            "*(*foo)",
+            [("*(*foo)", E)]
+        );
+
+        test_emphasis!(
+            closed_because_newline_then_alphanumeric_before_delimiter,
+            "*foo\nbar*",
+            [("foo\nbar", I)]
+        );
+
+        // Nested empgasis
+        test_emphasis!(
+            nested_bold_in_italics,
+            "*foo **bar** baz*",
+            [("foo ", I), ("bar", I | B), (" baz", I)]
+        );
+        test_emphasis!(
+            nested_bold_in_italics_no_whitepace,
+            "*foo**bar**baz*",
+            [("foo", I), ("bar", I | B), ("baz", I)]
+        );
+        test_emphasis!(
+            nested_bold_in_italics_complicated,
+            "*foo**bar***",
+            [("foo", I), ("bar", I | B)]
+        );
+
+        // matching delimiter runs
+        test_emphasis!(no_empty_emphasis, "__foo", [("__foo", E)]);
+        test_emphasis!(
+            cant_close_when_sum_is_multiple_of_three_but_not_both_lengths_are_multiples_of_three,
+            "*foo**bar*",
+            [("foo**bar", I)]
+        );
+        test_emphasis!(
+            can_close_when_sum_is_multiple_of_three_and_both_lengths_are_multiples_of_three,
+            "foo***bar***baz",
+            [("foo", E), ("bar", I | B), ("baz", E)]
+        );
+
+        test_emphasis!(
+            literal_delimiter_cant_appear_at_begining_or_end_of_run,
+            "foo *** foo *\\**",
+            [("foo *** foo ", E), ("*", I)]
+        );
+        test_emphasis!(mismatch_more_before, "**foo*", [("*", E), ("foo", I)]);
+        test_emphasis!(mismatch_more_after, "*foo****", [("foo", I), ("***", E)]);
+        test_emphasis!(
+            two_potential_opening_share_same_closing_pick_shortest,
+            "**foo **bar baz**",
+            [("**foo ", E), ("bar baz", B)]
+        );
+    }
 }
