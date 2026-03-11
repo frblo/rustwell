@@ -589,9 +589,9 @@ fn write_line(
         None => todo!(),
     }
 
-    let breakpoint_index = match breakpoint {
-        Some(b) => b.index,
-        None => content.len(),
+    let (breakpoint_index, break_word) = match breakpoint {
+        Some(b) => (b.index, b.break_type == BreakType::BreakWord),
+        None => (content.len(), false),
     };
 
     match text_direction {
@@ -647,6 +647,17 @@ fn write_line(
 
         glyph_index += relative_break_index - relative_index;
         start_index += relative_break_index - relative_index;
+    }
+
+    if break_word {
+        surface.draw_text(
+            Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
+            fonts.regular.clone(),
+            FONT_SIZE as f32,
+            "-".into(),
+            false,
+            krilla::text::TextDirection::LeftToRight,
+        );
     }
 }
 
