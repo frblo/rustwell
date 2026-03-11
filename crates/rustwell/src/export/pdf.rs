@@ -75,6 +75,7 @@ struct Margins {
     pub transition: Margin,
     pub centered: Margin,
     pub synopsis: Margin,
+    pub page_number: Margin,
 }
 
 const MARGINS: Margins = Margins {
@@ -143,6 +144,10 @@ const MARGINS: Margins = Margins {
         right: 144.0,
     },
     synopsis: Margin {
+        left: 108.0,
+        right: 72.0,
+    },
+    page_number: Margin {
         left: 108.0,
         right: 72.0,
     },
@@ -219,6 +224,23 @@ impl PdfExporter {
                 .start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
             let mut surface = page.surface();
             let mut line_idx = 0;
+
+            if page_idx > 0 {
+                let residual_page_number = write_element_custom_top_margin(
+                    size,
+                    &format!("{}.", page_idx + 1).into(),
+                    &MARGINS.page_number,
+                    &mut 0,
+                    &mut 0,
+                    2,
+                    &mut surface,
+                    fonts,
+                    Alignment::RightToLeft,
+                    36,
+                );
+
+                assert!(residual_page_number.is_none());
+            }
 
             loop {
                 if line_idx >= max_lines_per_page {
@@ -541,6 +563,32 @@ fn write_element(
     fonts: &Fonts,
     text_direction: Alignment,
 ) -> Option<usize> {
+    write_element_custom_top_margin(
+        size,
+        content,
+        margin,
+        breakpoint_index,
+        line_index,
+        max_lines,
+        surface,
+        fonts,
+        text_direction,
+        TOP_MARGIN,
+    )
+}
+
+fn write_element_custom_top_margin(
+    size: &PaperSize,
+    content: &RichString,
+    margin: &Margin,
+    breakpoint_index: &mut usize,
+    line_index: &mut usize,
+    max_lines: usize,
+    surface: &mut Surface,
+    fonts: &Fonts,
+    text_direction: Alignment,
+    top_margin: usize,
+) -> Option<usize> {
     let left_margin = margin.left;
     let right_margin = margin.right;
     let span = glyph_span(size, left_margin, right_margin);
@@ -558,7 +606,7 @@ fn write_element(
         write_line(
             surface,
             left_margin,
-            (FONT_SIZE * *line_index + TOP_MARGIN) as f32,
+            (FONT_SIZE * *line_index + top_margin) as f32,
             content,
             start_index,
             breakpoints.get(*breakpoint_index),
