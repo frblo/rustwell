@@ -316,7 +316,7 @@ impl PdfExporter {
                     }
                     Element::Action(s) => we(s, &MARGINS.action, Alignment::LeftToRight),
                     Element::Dialogue(dialogue) => {
-                        write_dialogue(
+                        let premature_exit = write_dialogue(
                             dialogue,
                             &mut residual_dialogue_idx,
                             &mut residual_breakpoint_idx,
@@ -327,47 +327,51 @@ impl PdfExporter {
                             fonts,
                             &MARGINS.dialogue,
                         );
-                        if residual_dialogue_idx.is_some() {
+                        if residual_dialogue_idx.is_some() || premature_exit {
                             break;
                         }
                     }
                     Element::DualDialogue(dialogue0, dialogue1) => {
                         let mut initial_line_index = line_idx;
+                        let mut premature_exit = false;
                         if (residual_dual_dialogue_idx.0.is_none()
                             && residual_dual_dialogue_idx.1.is_none())
                             || residual_dual_dialogue_idx.0.is_some()
                         {
-                            write_dialogue(
-                                dialogue0,
-                                &mut residual_dual_dialogue_idx.0,
-                                &mut residual_dual_breakpoint_idx.0,
-                                size,
-                                max_lines_per_page,
-                                &mut line_idx,
-                                &mut surface,
-                                fonts,
-                                &MARGINS.dual_dialogue.left,
-                            );
+                            premature_exit = premature_exit
+                                || write_dialogue(
+                                    dialogue0,
+                                    &mut residual_dual_dialogue_idx.0,
+                                    &mut residual_dual_breakpoint_idx.0,
+                                    size,
+                                    max_lines_per_page,
+                                    &mut line_idx,
+                                    &mut surface,
+                                    fonts,
+                                    &MARGINS.dual_dialogue.left,
+                                );
                         }
                         if (residual_dual_dialogue_idx.1.is_none()
                             && residual_dual_dialogue_idx.0.is_none())
                             || residual_dual_dialogue_idx.1.is_some()
                         {
-                            write_dialogue(
-                                dialogue1,
-                                &mut residual_dual_dialogue_idx.1,
-                                &mut residual_dual_breakpoint_idx.1,
-                                size,
-                                max_lines_per_page,
-                                &mut initial_line_index,
-                                &mut surface,
-                                fonts,
-                                &MARGINS.dual_dialogue.right,
-                            );
+                            premature_exit = premature_exit
+                                || write_dialogue(
+                                    dialogue1,
+                                    &mut residual_dual_dialogue_idx.1,
+                                    &mut residual_dual_breakpoint_idx.1,
+                                    size,
+                                    max_lines_per_page,
+                                    &mut initial_line_index,
+                                    &mut surface,
+                                    fonts,
+                                    &MARGINS.dual_dialogue.right,
+                                );
                         }
                         line_idx = line_idx.max(initial_line_index);
                         if residual_dual_dialogue_idx.0.is_some()
                             || residual_dual_dialogue_idx.1.is_some()
+                            || premature_exit
                         {
                             break;
                         }
@@ -424,7 +428,7 @@ fn write_dialogue(
     surface: &mut Surface,
     fonts: &Fonts,
     dialogue_margins: &DialogueMargins,
-) {
+) -> bool {
     let mut character_name = dialogue.character.clone();
     match (*residual_dialogue, &dialogue.extension) {
         (Some(_), _) => {
@@ -444,7 +448,7 @@ fn write_dialogue(
     );
     let name_lines_count = break_points(&character_name, span).len() + 1;
     if *line_index + name_lines_count + 1 >= max_lines {
-        return;
+        return true;
     }
     assert!(name_lines_count < max_lines);
 
@@ -476,7 +480,7 @@ fn write_dialogue(
                 Alignment::LeftToRight,
             );
 
-            return;
+            return false;
         }
         let mut breakpoint_index = match *residual_index {
             Some(i) => {
@@ -523,6 +527,7 @@ fn write_dialogue(
     }
 
     *residual_dialogue = None;
+    false
 }
 
 fn write_element(
