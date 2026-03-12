@@ -3,7 +3,9 @@ use crate::screenplay::Dialogue;
 use crate::screenplay::DialogueElement;
 use crate::screenplay::Element;
 use crate::screenplay::Screenplay;
+use crate::screenplay::Span;
 use crate::screenplay::TitlePage;
+use std::iter::Enumerate;
 use std::iter::Peekable;
 use std::str::Lines;
 
@@ -38,9 +40,9 @@ pub fn parse(src: &str) -> Screenplay {
 /// Keeps an iterator of the source, a accumulative list of [`Element`]s, and
 /// a state. Also tracks a [`TitlePage`] if such exists in the source.
 struct Parser<'a> {
-    lines: Peekable<Lines<'a>>,
+    lines: Peekable<Enumerate<Lines<'a>>>,
     state: State,
-    elements: Vec<Element>,
+    elements: Vec<Span<Element>>,
     title_page: Option<TitlePage>,
 }
 
@@ -50,7 +52,7 @@ impl<'a> Parser<'a> {
     /// Expects `src` to have been preprocessed.
     fn new(src: &'a str) -> Self {
         Self {
-            lines: src.lines().peekable(),
+            lines: src.lines().enumerate().peekable(),
             state: State::Default,
             elements: Vec::new(),
             title_page: None,
@@ -67,7 +69,7 @@ impl<'a> Parser<'a> {
     /// calling trim on a already trimmed [&str].
     fn parse(mut self) -> Screenplay {
         self.parse_title();
-        while let Some(line) = self.lines.next() {
+        while let Some((i, line)) = self.lines.next() {
             let trimmed = line.trim();
 
             if trimmed.is_empty() && !line.starts_with("  ") {
@@ -78,22 +80,23 @@ impl<'a> Parser<'a> {
             match self.state {
                 State::Default => {
                     // The first one returning true will break
-                    if self.try_section(trimmed)
-                        || self.try_page_break(trimmed)
-                        || self.try_synopsis(trimmed)
-                        || self.try_forced_action(trimmed)
-                        || self.try_centered(trimmed)
-                        || self.try_lyrics(trimmed)
-                        || self.try_heading(trimmed)
-                        || self.try_transition(trimmed)
-                        || self.try_dialogue_start(trimmed)
-                        || self.try_action(line)
+                    if self.try_section(trimmed, i)
+                        || self.try_page_break(trimmed, i)
+                        || self.try_synopsis(trimmed, i)
+                        || self.try_forced_action(trimmed, i)
+                        || self.try_centered(trimmed, i)
+                        || self.try_lyrics(trimmed, i)
+                        || self.try_heading(trimmed, i)
+                        || self.try_transition(trimmed, i)
+                        || self.try_dialogue_start(trimmed, i)
+                        || self.try_action(line, i)
                     {}
                 }
                 State::InDialogue => {
-                    let curr_dialogue = self
+                    let (curr_dialogue, end_line) = self
                         .get_last_dialogue()
                         .expect("Must exist since we are in dialogue block");
+                    *end_line = i;
 
                     if trimmed.starts_with('(') {
                         curr_dialogue
@@ -107,9 +110,9 @@ impl<'a> Parser<'a> {
                         .push(DialogueElement::Line(RichString::from(trimmed)));
                 }
                 State::InBlock => {
-                    if self.try_centered(trimmed)
-                        || self.try_lyrics(trimmed)
-                        || self.try_action(line)
+                    if self.try_centered(trimmed, i)
+                        || self.try_lyrics(trimmed, i)
+                        || self.try_action(line, i)
                     {}
                 }
             }
@@ -133,7 +136,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn try_section(&mut self, line: &str) -> bool {
+    fn try_section(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with('#').then_some(s),
@@ -141,111 +144,136 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn try_synopsis(&mut self, line: &str) -> bool {
+    fn try_synopsis(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('='),
             |this, inner| {
                 if this.state == State::InBlock
-                    && let Some(Element::Synopsis(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::Synopsis(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::Synopsis(rs));
+                this.elements
+                    .push(Span::new(Element::Synopsis(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_page_break(&mut self, line: &str) -> bool {
+    fn try_page_break(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with("===").then_some(s),
-            |this, _| this.elements.push(Element::PageBreak),
+            |this, _| this.elements.push(Span::new(Element::PageBreak, line_idx)),
         )
     }
 
-    fn try_forced_action(&mut self, line: &str) -> bool {
+    fn try_forced_action(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('!'),
             |this, inner| {
-                this.elements.push(Element::Action(RichString::from(inner)));
+                this.elements.push(Span::new(
+                    Element::Action(RichString::from(inner)),
+                    line_idx,
+                ));
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_centered(&mut self, line: &str) -> bool {
+    fn try_centered(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim().strip_prefix('>').and_then(|u| u.strip_suffix('<')),
             |this, inner| {
                 let inner = inner.trim();
                 if this.state == State::InBlock
-                    && let Some(Element::CenteredText(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::CenteredText(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::CenteredText(rs));
+                this.elements
+                    .push(Span::new(Element::CenteredText(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_lyrics(&mut self, line: &str) -> bool {
+    fn try_lyrics(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('~'),
             |this, inner| {
                 if this.state == State::InBlock
-                    && let Some(Element::Lyrics(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::Lyrics(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::Lyrics(rs));
+                this.elements.push(Span::new(Element::Lyrics(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_action(&mut self, line: &str) -> bool {
+    fn try_action(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, line| Some(line),
             |this, inner| {
                 if this.state == State::InBlock
-                    && let Some(Element::Action(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::Action(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::Action(rs));
+                this.elements.push(Span::new(Element::Action(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_heading(&mut self, line: &str) -> bool {
+    fn try_heading(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -287,42 +315,60 @@ impl<'a> Parser<'a> {
                     inner = new_inner.trim_end();
                 }
 
-                this.elements.push(Element::Heading {
-                    slug: RichString::from(inner),
-                    number,
-                });
+                this.elements.push(Span::new(
+                    Element::Heading {
+                        slug: RichString::from(inner),
+                        number,
+                    },
+                    line_idx,
+                ));
 
                 this.lines.next();
             },
         )
     }
 
-    fn get_last_dialogue(&mut self) -> Option<&mut Dialogue> {
-        let Some(Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue)) =
-            self.elements.last_mut()
+    fn get_last_dialogue(&mut self) -> Option<(&mut Dialogue, &mut usize)> {
+        let Some(Span {
+            start_line: _,
+            end_line,
+            inner: Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue),
+        }) = self.elements.last_mut()
         else {
             return None;
         };
 
-        Some(curr_dialogue)
+        Some((curr_dialogue, end_line))
     }
 
-    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str) -> &'s str {
+    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str, line_idx: usize) -> &'s str {
         let new_dialogue = Dialogue::new();
 
         if let Some(stripped) = inner.trim_end().strip_suffix('^')
-            && let Some(&Element::Dialogue(_)) = self.elements.last()
-            && let Some(Element::Dialogue(d)) = self.elements.pop()
+            && let Some(&Span {
+                start_line: _,
+                end_line: _,
+                inner: Element::Dialogue(_),
+            }) = self.elements.last()
+            && let Some(Span {
+                start_line,
+                end_line: _,
+                inner: Element::Dialogue(d),
+            }) = self.elements.pop()
         {
-            self.elements.push(Element::DualDialogue(d, new_dialogue));
+            self.elements.push(Span::new(
+                Element::DualDialogue(d, new_dialogue),
+                start_line,
+            ));
             return stripped;
         }
 
-        self.elements.push(Element::Dialogue(new_dialogue));
+        self.elements
+            .push(Span::new(Element::Dialogue(new_dialogue), line_idx));
         inner
     }
 
-    fn try_dialogue_start(&mut self, line: &str) -> bool {
+    fn try_dialogue_start(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -337,9 +383,9 @@ impl<'a> Parser<'a> {
                 (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
             },
             |this, inner| {
-                let mut inner = this.insert_empty_dialogue(inner);
+                let mut inner = this.insert_empty_dialogue(inner, line_idx);
 
-                let curr_dialogue = this
+                let (curr_dialogue, end_line) = this
                     .get_last_dialogue()
                     .expect("Just pushed to list, must exist");
 
@@ -351,13 +397,14 @@ impl<'a> Parser<'a> {
                 }
 
                 curr_dialogue.character = RichString::from(inner);
+                *end_line = line_idx;
 
                 this.state = State::InDialogue;
             },
         )
     }
 
-    fn try_transition(&mut self, line: &str) -> bool {
+    fn try_transition(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -374,8 +421,10 @@ impl<'a> Parser<'a> {
                 (transition_elem && this.next_line_is_empty()).then_some(line)
             },
             |this, inner| {
-                this.elements
-                    .push(Element::Transition(RichString::from(inner)));
+                this.elements.push(Span::new(
+                    Element::Transition(RichString::from(inner)),
+                    line_idx,
+                ));
 
                 this.lines.next();
             },
@@ -385,7 +434,7 @@ impl<'a> Parser<'a> {
     fn parse_title(&mut self) {
         let mut tp = TitlePage::new();
 
-        while let Some(line) = self.lines.peek() {
+        while let Some((_, line)) = self.lines.peek() {
             let Some((key, val)) = line.split_once(':') else {
                 break;
             };
@@ -427,7 +476,7 @@ impl<'a> Parser<'a> {
 
     fn take_indented_block(&mut self) -> Vec<RichString> {
         let mut out = Vec::new();
-        while let Some(next) = self.lines.peek().copied() {
+        while let Some((_, next)) = self.lines.peek().copied() {
             if next.starts_with("   ") {
                 self.lines.next();
                 out.push(RichString::from(next.trim()));
@@ -439,7 +488,7 @@ impl<'a> Parser<'a> {
     }
 
     fn next_line_is_empty(&mut self) -> bool {
-        self.lines.peek().is_none_or(|s| s.trim().is_empty())
+        self.lines.peek().is_none_or(|(_, s)| s.trim().is_empty())
     }
 }
 
@@ -570,471 +619,361 @@ enum State {
 mod tests {
     use super::*;
 
-    fn parser_tester(input: &str, correct: Screenplay) {
+    macro_rules! test_screenplay {
+        ($name:ident, $input:expr, [$($elem:expr),*]) => {
+            #[test]
+            fn $name() {
+            test_parse($input, [$($elem),*]);
+            }
+        };
+    }
+
+    fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = Element>) {
         let parsed = parse(input);
-        assert_eq!(parsed, correct)
+        for (
+            Span {
+                start_line: _,
+                end_line: _,
+                inner: actual,
+            },
+            expected,
+        ) in parsed.elements.iter().zip(expected)
+        {
+            assert_eq!(actual, &expected);
+        }
     }
 
-    #[test]
-    fn parses_heading_without_number() {
-        let input = "InT. OUTSIDE - DAY";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
-                slug: input.into(),
-                number: None,
-            }],
-        );
+    test_screenplay!(
+        parses_heading_without_number,
+        "InT. OUTSIDE - DAY",
+        [Element::Heading {
+            slug: "InT. OUTSIDE - DAY".into(),
+            number: None,
+        }]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        parses_heading_with_number,
+        "INT. OUTSIDE - DAY #S.1#",
+        [Element::Heading {
+            slug: "INT. OUTSIDE - DAY".into(),
+            number: Some("S.1".to_string()),
+        }]
+    );
 
-    #[test]
-    fn parses_heading_with_number() {
-        let input = "INT. OUTSIDE - DAY #S.1#";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
-                slug: "INT. OUTSIDE - DAY".into(),
-                number: Some("S.1".to_string()),
-            }],
-        );
+    test_screenplay!(
+        parses_heading_forced,
+        ".OUTSIDE - DAY",
+        [Element::Heading {
+            slug: "OUTSIDE - DAY".into(),
+            number: None,
+        }]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        parses_heading_forced_with_number,
+        ".OUTSIDE - DAY #S.1#",
+        [Element::Heading {
+            slug: "OUTSIDE - DAY".into(),
+            number: Some("S.1".to_string()),
+        }]
+    );
 
-    #[test]
-    fn parses_heading_forced() {
-        let input = ".OUTSIDE - DAY";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
-                slug: "OUTSIDE - DAY".into(),
-                number: None,
-            }],
-        );
+    test_screenplay!(
+        does_not_parse_heading_whitout_dot,
+        "Intro music plays.",
+        [Element::Action("Intro music plays.".into())]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        parses_action,
+        "They look at the test output - it's all failing.",
+        [Element::Action(
+            "They look at the test output - it's all failing.".into()
+        )]
+    );
 
-    #[test]
-    fn parses_heading_forced_with_number() {
-        let input = ".OUTSIDE - DAY #S.1#";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
-                slug: "OUTSIDE - DAY".into(),
-                number: Some("S.1".to_string()),
-            }],
-        );
+    test_screenplay!(
+        parses_action_forced,
+        "!INT. They look at the test output - it's all failing.",
+        [Element::Action(
+            "INT. They look at the test output - it's all failing.".into(),
+        )]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn does_not_parse_heading_whitout_dot() {
-        let input = "Intro music plays.";
-        let correct = Screenplay::new(None, vec![Element::Action("Intro music plays.".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_action() {
-        let input = "They look at the test output - it's all failing.";
-        let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_action_forced() {
-        let input = "!INT. They look at the test output - it's all failing.";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Action(
-                "INT. They look at the test output - it's all failing.".into(),
-            )],
-        );
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_without_extension() {
-        let input = r#"
+    test_screenplay!(
+        parses_dialogue_without_extension,
+        r"
 CHAR
 (sad)
 Nooo!
 (angry)
-I am angry.
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
-                character: "CHAR".into(),
-                extension: None,
-                elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                    DialogueElement::Parenthetical("(angry)".into()),
-                    DialogueElement::Line("I am angry.".into()),
-                ],
-            })],
-        );
+I am angry.",
+        [Element::Dialogue(Dialogue {
+            character: "CHAR".into(),
+            extension: None,
+            elements: vec![
+                DialogueElement::Parenthetical("(sad)".into()),
+                DialogueElement::Line("Nooo!".into()),
+                DialogueElement::Parenthetical("(angry)".into()),
+                DialogueElement::Line("I am angry.".into()),
+            ],
+        })]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_with_extension() {
-        let input = r#"
+    test_screenplay!(
+        parses_dialogue_with_extension,
+        r"
 CHAR (V.O)
 (sad)
-Nooo!
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
-                character: "CHAR".into(),
-                extension: Some("V.O".into()),
-                elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                ],
-            })],
-        );
+Nooo!",
+        [Element::Dialogue(Dialogue {
+            character: "CHAR".into(),
+            extension: Some("V.O".into()),
+            elements: vec![
+                DialogueElement::Parenthetical("(sad)".into()),
+                DialogueElement::Line("Nooo!".into()),
+            ],
+        })]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_without_extension_forced() {
-        let input = r#"
+    test_screenplay!(
+        parses_dialogue_without_extension_forced,
+        r"
 @char
 (sad)
 Nooo!
 (angry)
-I am angry.
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
-                character: "char".into(),
-                extension: None,
-                elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                    DialogueElement::Parenthetical("(angry)".into()),
-                    DialogueElement::Line("I am angry.".into()),
-                ],
-            })],
-        );
+I am angry.",
+        [Element::Dialogue(Dialogue {
+            character: "char".into(),
+            extension: None,
+            elements: vec![
+                DialogueElement::Parenthetical("(sad)".into()),
+                DialogueElement::Line("Nooo!".into()),
+                DialogueElement::Parenthetical("(angry)".into()),
+                DialogueElement::Line("I am angry.".into()),
+            ],
+        })]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_with_extension_forced() {
-        let input = r#"
+    test_screenplay!(
+        parses_dialogue_with_extension_forced,
+        r"
 @char (V.O)
 (sad)
-Nooo!
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
-                character: "char".into(),
-                extension: Some("V.O".into()),
-                elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                ],
-            })],
-        );
+Nooo!",
+        [Element::Dialogue(Dialogue {
+            character: "char".into(),
+            extension: Some("V.O".into()),
+            elements: vec![
+                DialogueElement::Parenthetical("(sad)".into()),
+                DialogueElement::Line("Nooo!".into()),
+            ],
+        })]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dual_dialogue() {
-        let input = r#"
+    test_screenplay!(
+        parses_dual_dialogue,
+        r"
 @CHaR
 (sad)
 Nooo!
 
 CHOR (V.O) ^
-YES!
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::DualDialogue(
-                Dialogue {
-                    character: "CHaR".into(),
-                    extension: None,
-                    elements: vec![
-                        DialogueElement::Parenthetical("(sad)".into()),
-                        DialogueElement::Line("Nooo!".into()),
-                    ],
-                },
-                Dialogue {
-                    character: "CHOR".into(),
-                    extension: Some("V.O".into()),
-                    elements: vec![DialogueElement::Line("YES!".into())],
-                },
-            )],
-        );
+YES!",
+        [Element::DualDialogue(
+            Dialogue {
+                character: "CHaR".into(),
+                extension: None,
+                elements: vec![
+                    DialogueElement::Parenthetical("(sad)".into()),
+                    DialogueElement::Line("Nooo!".into()),
+                ],
+            },
+            Dialogue {
+                character: "CHOR".into(),
+                extension: Some("V.O".into()),
+                elements: vec![DialogueElement::Line("YES!".into())],
+            },
+        )]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        parses_lyrics,
+        "~Hey ho let's go",
+        [Element::Lyrics("Hey ho let's go".into())]
+    );
 
-    #[test]
-    fn parses_lyrics() {
-        let input = "~Hey ho let's go";
-        let correct = Screenplay::new(None, vec![Element::Lyrics("Hey ho let's go".into())]);
+    test_screenplay!(
+        parses_transition,
+        "\nCUT TO:\n",
+        [Element::Transition("CUT TO:".into())]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        parses_transition_forced,
+        ">Camera does a spin",
+        [Element::Transition("Camera does a spin".into())]
+    );
 
-    #[test]
-    fn parses_transition() {
-        let input = "\nCUT TO:\n";
-        let correct = Screenplay::new(None, vec![Element::Transition("CUT TO:".into())]);
+    test_screenplay!(
+        parses_centered,
+        "> The end    <",
+        [Element::CenteredText("The end".into())]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(parses_pagebreak_with_3_equals, "===", [Element::PageBreak]);
 
-    #[test]
-    fn parses_transition_forced() {
-        let input = ">Camera does a spin";
-        let correct = Screenplay::new(None, vec![Element::Transition("Camera does a spin".into())]);
+    test_screenplay!(
+        parses_pagebreak_with_8_equals,
+        "========",
+        [Element::PageBreak]
+    );
 
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        parses_synopsis,
+        "=In this scene everyone gets cake.",
+        [Element::Synopsis(
+            "In this scene everyone gets cake.".into(),
+        )]
+    );
 
-    #[test]
-    fn parses_centered() {
-        let input = "> The end    <";
-        let correct = Screenplay::new(None, vec![Element::CenteredText("The end".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_pagebreak_with_3_equals() {
-        let input = "===";
-        let correct = Screenplay::new(None, vec![Element::PageBreak]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_pagebreak_with_8_equals() {
-        let input = "========";
-        let correct = Screenplay::new(None, vec![Element::PageBreak]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_synopsis() {
-        let input = "=In this scene everyone gets cake.";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Synopsis(
-                "In this scene everyone gets cake.".into(),
-            )],
-        );
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn does_not_parse_section() {
-        let input = r"
+    test_screenplay!(
+        does_not_parse_section,
+        r"
 # Act 1
 
 INT. HOUSE
 
 ## Montage
 
-House is empty.";
+House is empty.",
+        [
+            Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            },
+            Element::Action("House is empty.".into())
+        ]
+    );
 
-        let correct = Screenplay::new(
-            None,
-            vec![
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action("House is empty.".into()),
-            ],
-        );
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_boneyard() {
-        let input = r"
+    test_screenplay!(
+        filters_out_boneyard,
+        r"
 INT. HOUSE
 
 /* This is a boneyard
                 and should not be parsed
 , you understand?*/
 
-House is empty.";
+House is empty.",
+        [
+            Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            },
+            Element::Action("House is empty.".into())
+        ]
+    );
 
-        let correct = Screenplay::new(
-            None,
-            vec![
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action("House is empty.".into()),
-            ],
-        );
+    test_screenplay!(
+        filters_out_boneyard_inlined,
+        "The house is /*extremely full*/empty.",
+        [Element::Action("The house is empty.".into())]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_boneyard_inlined() {
-        let input = "The house is /*extremely full*/empty.";
-
-        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_boneyard_unended() {
-        let input = r"
+    test_screenplay!(
+        filters_out_boneyard_unended,
+        r"
 INT. HOUSE
 
 /* This is a boneyard
                 and should not be parsed
 , you understand?
 
-House is empty.";
+House is empty.",
+        [Element::Heading {
+            slug: "INT. HOUSE".into(),
+            number: None,
+        }]
+    );
 
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            }],
-        );
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_multiline() {
-        let input = r"
+    test_screenplay!(
+        filters_out_note_multiline,
+        r"
 INT. HOUSE
 
 [[ This is a note
                 and should not be parsed
 , you understand?]]
 
-House is empty.";
+House is empty.",
+        [
+            Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            },
+            Element::Action("House is empty.".into())
+        ]
+    );
 
-        let correct = Screenplay::new(
-            None,
-            vec![
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action("House is empty.".into()),
-            ],
-        );
+    test_screenplay!(
+        filters_out_note_inlined,
+        "The house is [[should it be full?]]empty.",
+        [Element::Action("The house is empty.".into())]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_inlined() {
-        let input = "The house is [[should it be full?]]empty.";
-
-        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_inlined_multiline() {
-        let input = r"
+    test_screenplay!(
+        filters_out_note_inlined_multiline,
+        r"
 INT. HOUSE
 
 The house [[ This is a note
                 and should not be parsed
-, you understand?]]is empty.";
+, you understand?]]is empty.",
+        [
+            Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            },
+            Element::Action("The house is empty.".into())
+        ]
+    );
 
-        let correct = Screenplay::new(
-            None,
-            vec![
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action("The house is empty.".into()),
-            ],
-        );
+    test_screenplay!(
+        filters_out_note_multiline_empty_newline,
+        "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.",
+        [
+            Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            },
+            Element::Action("The house is empty.".into())
+        ]
+    );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_multiline_empty_newline() {
-        let input = "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action("The house is empty.".into()),
-            ],
-        );
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn not_filters_out_unended_note_multiline() {
-        let input = r"
+    test_screenplay!(
+        not_filters_out_unended_note_multiline,
+        r"
 INT. HOUSE
 
 The house [[wow
 
-no";
+no",
+        [
+            Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            },
+            Element::Action("The house [[wow".into()),
+            Element::Action("no".into())
+        ]
+    );
 
-        let correct = Screenplay::new(
-            None,
-            vec![
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action("The house [[wow".into()),
-                Element::Action("no".into()),
-            ],
-        );
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn not_filters_out_unended_note() {
-        let input = "This is [[ not right";
-
-        let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
-
-        parser_tester(input, correct)
-    }
+    test_screenplay!(
+        not_filters_out_unended_note,
+        "This is [[ not right",
+        [Element::Action("This is [[ not right".into())]
+    );
 }

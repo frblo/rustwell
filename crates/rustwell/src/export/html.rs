@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{
     export::Exporter,
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element, Screenplay, TitlePage},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay, Span, TitlePage},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -38,7 +38,12 @@ impl Exporter for HtmlExporter {
         if let Some(titlepage) = &screenplay.titlepage {
             writeln!(writer, "{}", self.export_titlepage(titlepage))?;
         }
-        for e in &screenplay.elements {
+        for Span {
+            start_line: _,
+            end_line: _,
+            inner: e,
+        } in &screenplay.elements
+        {
             writeln!(writer, "{}", self.export_element(e))?;
         }
         writeln!(writer, "</div></body>")?;
