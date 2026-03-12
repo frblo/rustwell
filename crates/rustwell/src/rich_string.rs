@@ -176,6 +176,85 @@ impl RichString {
 
         (tokens, delimiters)
     }
+
+    fn match_delimiters(delimiters: &mut Vec<Delimiter>) -> Vec<Match> {
+        let mut matches = Vec::new();
+        let mut stack: Vec<usize> = Vec::new();
+
+        for i in 0..delimiters.len() {
+            let can_close = delimiters[i].can_close;
+            let can_open = delimiters[i].can_open;
+
+            // First try to close against the stack.
+            if can_close {
+                let mut j = stack.len();
+                while j > 0 && delimiters[i].count > 0 {
+                    j -= 1;
+                    let opener_idx = stack[j];
+
+                    if delimiters[opener_idx].char != delimiters[i].char
+                        || delimiters[opener_idx].count == 0
+                        || !RichString::sum_of_three_rule(&delimiters[opener_idx], &delimiters[i])
+                    {
+                        continue;
+                    }
+
+                    let used = delimiters[opener_idx].count.min(delimiters[i].count);
+                    let attrs = match used {
+                        1 => Attributes::ITALIC,
+                        2 => Attributes::BOLD,
+                        _ => {
+                            if used % 2 == 0 {
+                                Attributes::BOLD
+                            } else {
+                                Attributes::BOLD | Attributes::ITALIC
+                            }
+                        }
+                    };
+
+                    matches.push(Match {
+                        opening_idx: opener_idx,
+                        closing_idx: i,
+                        attrs,
+                    });
+
+                    delimiters[opener_idx].count -= used;
+                    delimiters[i].count -= used;
+
+                    if delimiters[opener_idx].count == 0 {
+                        stack.remove(j);
+                    }
+                }
+            }
+
+            // Push as opener if it can open and has remaining count
+            if can_open && delimiters[i].count > 0 {
+                stack.push(i);
+            }
+        }
+
+        matches
+    }
+
+    /// If one of the delimiters can both open and close strong emphasis,
+    /// then the sum of the lengths of the delimiter runs containing the
+    /// opening and closing delimiters must not be a multiple of 3 unless
+    /// both lengths are multiples of 3.
+    fn sum_of_three_rule(a: &Delimiter, b: &Delimiter) -> bool {
+        if !((a.can_open && a.can_close) || (b.can_open && b.can_close)) {
+            return true;
+        }
+
+        if (a.count + b.count) % 3 != 0 {
+            return true;
+        }
+
+        if a.count % 3 == 0 && b.count % 3 == 0 {
+            return true;
+        }
+
+        false
+    }
 }
 
 impl Default for RichString {
@@ -246,6 +325,13 @@ struct Delimiter {
     token_idx: usize,
     can_open: bool,
     can_close: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Match {
+    opening_idx: usize,
+    closing_idx: usize,
+    attrs: Attributes,
 }
 
 fn is_left_flanking(before: Option<char>, after: Option<char>) -> bool {
@@ -412,6 +498,202 @@ mod tests {
             for token in tokens {
                 assert!(!token.contains('\\'))
             }
+        }
+    }
+
+    mod matching {
+        use super::*;
+
+        fn make_delimiter(char: char, count: usize, can_open: bool, can_close: bool) -> Delimiter {
+            Delimiter {
+                char,
+                count,
+                token_idx: 0,
+                can_open,
+                can_close,
+            }
+        }
+
+        fn open(char: char, count: usize) -> Delimiter {
+            make_delimiter(char, count, true, false)
+        }
+
+        fn close(char: char, count: usize) -> Delimiter {
+            make_delimiter(char, count, false, true)
+        }
+
+        fn ambiguous(char: char, count: usize) -> Delimiter {
+            make_delimiter(char, count, true, true)
+        }
+
+        #[test]
+        fn test_italic() {
+            let mut delimiters = vec![open('*', 1), close('*', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::ITALIC
+                }]
+            );
+        }
+
+        #[test]
+        fn test_bold() {
+            let mut delimiters = vec![open('*', 2), close('*', 2)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::BOLD
+                }]
+            );
+        }
+
+        #[test]
+        fn test_bold_italic() {
+            let mut delimiters = vec![open('*', 3), close('*', 3)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::BOLD | Attributes::ITALIC
+                }]
+            );
+        }
+
+        #[test]
+        fn test_four_even_is_bold() {
+            let mut delimiters = vec![open('*', 4), close('*', 4)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::BOLD
+                }]
+            );
+        }
+
+        #[test]
+        fn test_five_odd_is_bold_italic() {
+            let mut delimiters = vec![open('*', 5), close('*', 5)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::BOLD | Attributes::ITALIC
+                }]
+            );
+        }
+
+        #[test]
+        fn test_asymmetric_consumes_smaller() {
+            let mut delimiters = vec![open('*', 3), close('*', 2)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::BOLD
+                }]
+            );
+            assert_eq!(delimiters[0].count, 1);
+            assert_eq!(delimiters[1].count, 0);
+        }
+
+        #[test]
+        fn test_leftover_opener_matches_second_closer() {
+            let mut delimiters = vec![open('*', 3), close('*', 2), close('*', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![
+                    Match {
+                        opening_idx: 0,
+                        closing_idx: 1,
+                        attrs: Attributes::BOLD
+                    },
+                    Match {
+                        opening_idx: 0,
+                        closing_idx: 2,
+                        attrs: Attributes::ITALIC
+                    },
+                ]
+            );
+        }
+
+        #[test]
+        fn test_mismatched_chars_no_match() {
+            let mut delimiters = vec![open('*', 1), close('_', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert!(matches.is_empty());
+        }
+
+        #[test]
+        fn test_unclosed_opener_no_match() {
+            let mut delimiters = vec![open('*', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert!(matches.is_empty());
+        }
+
+        #[test]
+        fn test_unopened_closer_no_match() {
+            let mut delimiters = vec![close('*', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert!(matches.is_empty());
+        }
+
+        #[test]
+        fn test_ambiguous_closes_before_opening() {
+            let mut delimiters = vec![open('*', 1), ambiguous('*', 1), close('*', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::ITALIC
+                }]
+            );
+        }
+
+        #[test]
+        fn test_ambiguous_opens_when_nothing_to_close() {
+            let mut delimiters = vec![ambiguous('*', 1), close('*', 1)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert_eq!(
+                matches,
+                vec![Match {
+                    opening_idx: 0,
+                    closing_idx: 1,
+                    attrs: Attributes::ITALIC
+                }]
+            );
+        }
+
+        #[test]
+        fn test_sum_of_three_rule_blocks_match() {
+            let mut delimiters = vec![ambiguous('*', 1), ambiguous('*', 2)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert!(matches.is_empty());
+        }
+
+        #[test]
+        fn test_sum_of_three_rule_allows_multiples_of_three() {
+            let mut delimiters = vec![ambiguous('*', 3), ambiguous('*', 3)];
+            let matches = RichString::match_delimiters(&mut delimiters);
+            assert!(!matches.is_empty());
         }
     }
 
