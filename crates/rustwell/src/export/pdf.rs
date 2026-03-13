@@ -4,7 +4,7 @@ use krilla::{
     Document,
     color::rgb,
     destination::XyzDestination,
-    geom::Point,
+    geom::{PathBuilder, Point, Rect},
     num::NormalizedF32,
     outline::{Outline, OutlineNode},
     page::PageSettings,
@@ -729,8 +729,27 @@ fn write_line(
             krilla::text::TextDirection::LeftToRight,
         );
 
-        glyph_index += relative_break_index - relative_index;
-        start_index += relative_break_index - relative_index;
+        let glyphs_written = relative_break_index - relative_index;
+
+        if string_element.is_underline() {
+            let underline = {
+                let mut pb = PathBuilder::new();
+                let r = Rect::from_xywh(
+                    x + (glyph_index as f32 * FONT_WIDTH),
+                    y + 0.5,
+                    glyphs_written as f32 * FONT_WIDTH,
+                    0.75,
+                )
+                .unwrap();
+                pb.push_rect(r);
+                pb.close();
+                pb.finish().unwrap()
+            };
+            surface.draw_path(&underline);
+        }
+
+        glyph_index += glyphs_written;
+        start_index += glyphs_written;
     }
 
     if break_word {
