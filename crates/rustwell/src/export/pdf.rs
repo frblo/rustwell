@@ -19,7 +19,7 @@ use crate::{
     screenplay::{Dialogue, DialogueElement, Element},
 };
 
-const FONT_SIZE: usize = 12;
+const FONT_SIZE: usize = 12; // standard screenplay size
 const FONT_WIDTH: f32 = 7.2; // 12 * 0.6 (Courier Prime's aspect ratio)
 
 /// The font bundled together with Rustwell; Courier Prime.
@@ -32,40 +32,56 @@ const FONTS: [&[u8]; 4] = [
     include_bytes!("fonts/CourierPrime-BoldItalic.ttf"),
 ];
 
-struct Fonts {
+/// A family of fonts with the standard variants.
+struct FontFamily {
     pub regular: Font,
     pub bold: Font,
     pub italic: Font,
     pub bold_italic: Font,
 }
 
+/// Dimensions of a paper in points (pts).
 pub struct PaperSize {
     pub x: usize,
     pub y: usize,
 }
 
+/// The size of an `A4` paper in points (pts).
 pub const A4: PaperSize = PaperSize { x: 595, y: 842 }; // A4 size in pts
+/// The size of a `US letter` paper in points (pts).
 pub const LETTER: PaperSize = PaperSize { x: 612, y: 792 }; // Letter size in pts
 
+impl Default for PaperSize {
+    fn default() -> Self {
+        A4
+    }
+}
+
+/// The margin at the top of a page. Applicable on every page. In points.
 const TOP_MARGIN: usize = 72;
+/// The margin at the bottom of a page. Applicable on every page. In points.
 const BOTTOM_MARGIN: usize = 72;
 
+/// Left- and right margins, in points.
 struct Margin {
     pub left: f32,
     pub right: f32,
 }
 
+/// Collection of margins for the dialogue components.
 struct DialogueMargins {
     pub character: Margin,
     pub parenthetical: Margin,
     pub line: Margin,
 }
 
+/// Collection of margins for the dual dialogue components.
 struct DualDialogueMargins {
     pub left: DialogueMargins,
     pub right: DialogueMargins,
 }
 
+/// Collection of all margins for all different screenplay [`Elements`].
 struct Margins {
     pub heading: Margin,
     pub action: Margin,
@@ -78,6 +94,7 @@ struct Margins {
     pub page_number: Margin,
 }
 
+/// The standard margins for all different screenplay [`Elements`].
 const MARGINS: Margins = Margins {
     heading: Margin {
         left: 108.0,
@@ -160,14 +177,18 @@ const MARGINS: Margins = Margins {
 pub struct PdfExporter {
     /// Whether to include synopses in the output
     pub synopses: bool,
+    /// What size (type) of paper (e.g. A4 or US letter)
+    pub paper_size: PaperSize,
 }
 
 impl Exporter for PdfExporter {
+    /// The `.pdf` extension.
     fn file_extension(&self) -> &'static str {
         "pdf"
     }
 
-    /// Exports a `pdf` file and writes it to the provided writer.
+    /// Exports a `pdf` file and writes it to the provided writer. The pdf creation can fail if
+    /// certain elements do not fit within a single page.
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
         let regular_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[0]);
         let bold_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[1]);
@@ -175,14 +196,14 @@ impl Exporter for PdfExporter {
         let bold_italic_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[3]);
         let mut document = Document::new();
 
-        let fonts = Fonts {
+        let fonts = FontFamily {
             regular: Font::new(regular_data.into(), 0).unwrap(),
             bold: Font::new(bold_data.into(), 0).unwrap(),
             italic: Font::new(italic_data.into(), 0).unwrap(),
             bold_italic: Font::new(bold_italic_data.into(), 0).unwrap(),
         };
 
-        self.generate_pdf(&mut document, &A4, screenplay, &fonts)?;
+        self.generate_pdf(&mut document, &self.paper_size, screenplay, &fonts)?;
 
         let pdf = document
             .finish()
@@ -199,17 +220,22 @@ enum Alignment {
 }
 
 impl PdfExporter {
+    /// Generates a `pdf` document from a [`Screenplay`]. Runs in (more or less) a single pass.
     fn generate_pdf(
         &self,
         document: &mut Document,
         size: &PaperSize,
         screenplay: &Screenplay,
-        fonts: &Fonts,
+        fonts: &FontFamily,
     ) -> std::io::Result<()> {
+        // The index for which element in the screenplay is currently being processed.
         let mut screenplay_element_idx = 0;
 
+        // The index for which page in the document is currently being written.
         let mut page_idx = 0;
 
+        // The maximum number of writable lines which can fit on a page, considering the top and
+        // bottom margins.
         let max_lines_per_page = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
         let mut residual_breakpoint_idx = None;
         let mut residual_dialogue_idx = None;
@@ -225,6 +251,7 @@ impl PdfExporter {
             let mut surface = page.surface();
             let mut line_idx = 0;
 
+            // Writes the page number.
             if (screenplay.titlepage.is_none() && page_idx > 0)
                 || (screenplay.titlepage.is_some() && page_idx > 1)
             {
@@ -462,7 +489,7 @@ fn write_dialogue(
     max_lines: usize,
     line_index: &mut usize,
     surface: &mut Surface,
-    fonts: &Fonts,
+    fonts: &FontFamily,
     dialogue_margins: &DialogueMargins,
 ) -> std::io::Result<bool> {
     let mut character_name = dialogue.character.clone();
@@ -581,7 +608,7 @@ fn write_element(
     line_index: &mut usize,
     max_lines: usize,
     surface: &mut Surface,
-    fonts: &Fonts,
+    fonts: &FontFamily,
     text_direction: Alignment,
 ) -> std::io::Result<Option<usize>> {
     write_element_custom_top_margin(
@@ -606,7 +633,7 @@ fn write_element_custom_top_margin(
     line_index: &mut usize,
     max_lines: usize,
     surface: &mut Surface,
-    fonts: &Fonts,
+    fonts: &FontFamily,
     text_direction: Alignment,
     top_margin: usize,
 ) -> std::io::Result<Option<usize>> {
@@ -649,7 +676,7 @@ fn write_line(
     content: &RichString,
     mut start_index: usize,
     breakpoint: Option<&BreakPoint>,
-    fonts: &Fonts,
+    fonts: &FontFamily,
     text_direction: Alignment,
     size: &PaperSize,
     margin: &Margin,
