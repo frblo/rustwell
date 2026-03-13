@@ -275,20 +275,21 @@ impl PdfExporter {
                     None => 0,
                 };
 
-                let mut we = |content, margin, text_direction| {
-                    residual_breakpoint_idx = write_element(
-                        size,
-                        content,
-                        margin,
-                        &mut breakpoint_idx,
-                        &mut line_idx,
-                        max_lines_per_page,
-                        &mut surface,
-                        fonts,
-                        text_direction,
-                    )
-                    .unwrap()
-                };
+                macro_rules! write_element {
+                    ($content:expr, $margin:expr, $text_direction:expr) => {
+                        residual_breakpoint_idx = write_element(
+                            size,
+                            $content,
+                            $margin,
+                            &mut breakpoint_idx,
+                            &mut line_idx,
+                            max_lines_per_page,
+                            &mut surface,
+                            fonts,
+                            $text_direction,
+                        )?
+                    };
+                }
 
                 match &element {
                     Element::Heading { slug, number } => {
@@ -340,19 +341,11 @@ impl PdfExporter {
                                 },
                             ),
                         ));
-                        residual_breakpoint_idx = write_element(
-                            size,
-                            slug,
-                            &MARGINS.heading,
-                            &mut breakpoint_idx,
-                            &mut line_idx,
-                            max_lines_per_page,
-                            &mut surface,
-                            fonts,
-                            Alignment::LeftToRight,
-                        )?
+                        write_element!(slug, &MARGINS.heading, Alignment::LeftToRight);
                     }
-                    Element::Action(s) => we(s, &MARGINS.action, Alignment::LeftToRight),
+                    Element::Action(s) => {
+                        write_element!(s, &MARGINS.action, Alignment::LeftToRight);
+                    }
                     Element::Dialogue(dialogue) => {
                         let premature_exit = write_dialogue(
                             dialogue,
@@ -414,9 +407,15 @@ impl PdfExporter {
                             break;
                         }
                     }
-                    Element::Lyrics(s) => we(s, &MARGINS.lyrics, Alignment::RightToLeft),
-                    Element::Transition(s) => we(s, &MARGINS.transition, Alignment::RightToLeft),
-                    Element::CenteredText(s) => we(s, &MARGINS.centered, Alignment::Centered),
+                    Element::Lyrics(s) => {
+                        write_element!(s, &MARGINS.lyrics, Alignment::RightToLeft);
+                    }
+                    Element::Transition(s) => {
+                        write_element!(s, &MARGINS.transition, Alignment::RightToLeft);
+                    }
+                    Element::CenteredText(s) => {
+                        write_element!(s, &MARGINS.centered, Alignment::Centered);
+                    }
                     Element::Synopsis(s) => {
                         if self.synopses {
                             surface.set_fill(Some(Fill {
@@ -424,17 +423,7 @@ impl PdfExporter {
                                 opacity: NormalizedF32::new(0.5).unwrap(),
                                 rule: Default::default(),
                             }));
-                            write_element(
-                                size,
-                                s,
-                                &MARGINS.synopsis,
-                                &mut breakpoint_idx,
-                                &mut line_idx,
-                                max_lines_per_page,
-                                &mut surface,
-                                fonts,
-                                Alignment::LeftToRight,
-                            )?;
+                            write_element!(s, &MARGINS.synopsis, Alignment::LeftToRight);
                             surface.set_fill(None);
                         }
                     }
