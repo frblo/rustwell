@@ -91,39 +91,10 @@ br {
 }
 
 /* Slug */
-
 div {
     width: 460pt;
 }
-h1:before,h2:before,h3:before,h4:before,h5:before {
-    content: "\25e6\00a0";
-    margin-left:-9pt;
-}
-h1,h2,h3,h4,h5{
-    font-family:'Gill Sans','Helvetiva Neue',Helvetica,sans-serif;
-    margin-top:24pt;
-    font-weight:400;
-    color: rgb(110, 110, 110);
-    border-top:dotted 1px rgb(199, 199, 199);
-    background-image: -webkit-linear-gradient(top, rgb(255, 255, 245), rgb(255, 255, 255));
-    font-size: 11pt;
-}
-h1 {
-    margin-left:-71pt;
-}
-h2 {
-    margin-left:-61pt;
-}
-h3 {
-    margin-left:-41pt;
-}
-h4 {
-    margin-left:-21pt;
-}
-h5 {
-    margin-left:-1pt;
-}
-h6 {
+div.scene-heading {
     margin-top: 2em;
     text-transform: uppercase;
     font-weight: bold;
@@ -138,7 +109,7 @@ div.action p {
 .centered {
     text-align: center;
 }
-div.dialog,div.dual {
+div.dialogue,div.dual {
     margin-top: 1em;
     overflow: hidden;
 }
@@ -147,13 +118,13 @@ div.transition {
     margin-bottom: 12pt;
     text-align: right;
 }
-.dialog p.character {
+.dialogue p.character {
     padding-left: 153.33pt;
 }
-.dialog p.parenthetical {
+.dialogue p.parenthetical {
     padding-left: 115pt;
 }
-.dialog p {
+.dialogue p {
     padding-left: 76.67pt;
     width: 306.67pt;
 }
