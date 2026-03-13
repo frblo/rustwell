@@ -269,7 +269,9 @@ impl PdfExporter {
                 let element = &screenplay.elements[screenplay_element_idx];
                 let mut breakpoint_idx = match residual_breakpoint_idx {
                     Some(i) => {
-                        residual_breakpoint_idx = None;
+                        if !matches!(element, Element::Dialogue(_)) {
+                            residual_breakpoint_idx = None;
+                        }
                         i
                     }
                     None => 0,
@@ -434,6 +436,11 @@ impl PdfExporter {
                 }
 
                 line_idx += 1;
+
+                if residual_breakpoint_idx.is_some() {
+                    continue;
+                }
+
                 screenplay_element_idx += 1;
             }
 
@@ -476,15 +483,16 @@ fn write_dialogue(
         dialogue_margins.character.right,
     );
     let name_lines_count = break_points(&character_name, span).len() + 1;
-    if *line_index + name_lines_count + 1 >= max_lines {
-        return Ok(true);
-    }
 
     if name_lines_count >= max_lines {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Character name cannot be longer than a whole page.",
         ));
+    }
+
+    if *line_index + name_lines_count + 1 >= max_lines {
+        return Ok(true);
     }
 
     write_element(
@@ -501,7 +509,7 @@ fn write_dialogue(
 
     let mut dialogue_index = residual_dialogue.unwrap_or(0);
     while dialogue_index < dialogue.elements.len() {
-        if *line_index + 1 >= max_lines {
+        if *line_index >= max_lines {
             *residual_dialogue = Some(dialogue_index);
             write_element(
                 size,
@@ -515,7 +523,7 @@ fn write_dialogue(
                 Alignment::LeftToRight,
             )?;
 
-            return Ok(false);
+            return Ok(true);
         }
         let mut breakpoint_index = match *residual_index {
             Some(i) => {
