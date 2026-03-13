@@ -494,117 +494,77 @@ impl<'a> Parser<'a> {
 
 /// Removes boneyards, notes and normalizes tabs to four spaces
 fn preprocess_source(src: &str) -> String {
-    let bytes = src.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    let mut in_boneyard = false;
+    let without_boneyards = remove_boneyards(src);
+    remove_notes(&without_boneyards)
+}
 
-    // Filter out boneyard and replace tabs
-    while i < bytes.len() {
-        let b = bytes[i];
+fn remove_boneyards(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
 
-        if in_boneyard {
-            // Inside boneyard: preserve only newlines so that a boneyard can cover all whitespace
-            if b == b'\n' {
-                out.push(b'\n');
-                i += 1;
-                continue;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start].replace('\t', "    "));
+
+        let boneyard_content = &rest[start + 2..];
+        let (boneyard, after) = match boneyard_content.find("*/") {
+            Some(end) => (&boneyard_content[..end], &boneyard_content[end + 2..]),
+            None => (boneyard_content, ""),
+        };
+        if let Some(_) = boneyard.find('\n') {
+            out.push('\n');
+        }
+
+        rest = after;
+    }
+
+    out.push_str(&rest.replace('\t', "    "));
+    out
+}
+
+fn remove_notes(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+
+    while let Some(start) = rest.find("[[") {
+        out.push_str(&rest[..start]);
+
+        let note_content = &rest[start + 2..];
+        match note_content.find("]]") {
+            Some(close) => {
+                let inner = &note_content[..close];
+                match find_note_break(inner) {
+                    Some((break_pos, pat)) => {
+                        // Treat as unclosed: dump [[ and content up to and including break
+                        out.push_str("[[");
+                        out.push_str(&inner[..break_pos]);
+                        out.push_str(pat);
+                        rest = &note_content[break_pos + pat.len()..];
+                    }
+                    None => {
+                        rest = &note_content[close + 2..];
+                    }
+                }
             }
-
-            // Check if at the end of boneyard
-            if i + 1 < bytes.len() && b == b'*' && bytes[i + 1] == b'/' {
-                in_boneyard = false;
-                i += 2;
-                continue;
+            None => {
+                out.push_str("[[");
+                rest = note_content;
             }
-
-            i += 1;
-        } else {
-            // Check if at the start of a boneyard
-            if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
-                in_boneyard = true;
-                i += 2;
-                continue;
-            }
-
-            // A Fountain-specified tab: 4 spaces
-            if b == b'\t' {
-                out.extend_from_slice(b"    ");
-                i += 1;
-                continue;
-            }
-
-            // Normal character
-            out.push(b);
-            i += 1;
         }
     }
 
-    // Filter out notes
-    let mut final_out = Vec::with_capacity(out.len());
-    i = 0;
-    let mut in_note = false;
-    let mut note_buffer = Vec::new();
+    out.push_str(rest);
+    out
+}
 
-    while i < out.len() {
-        let b = out[i];
-
-        if in_note {
-            // Inside note: preserve only newlines so that a note can cover all whitespace
-            if b == b'\n' {
-                // Allowed newline in note: "[[\n  \n]]"
-                if i + 3 < out.len()
-                    && out[i + 1] == b' '
-                    && out[i + 2] == b' '
-                    && out[i + 3] == b'\n'
-                {
-                    note_buffer.push(b'\n');
-                    note_buffer.push(b' ');
-                    note_buffer.push(b' ');
-                    note_buffer.push(b'\n');
-                    i += 4;
-                    continue;
-                }
-                // Exit note without closing it
-                if i + 1 < out.len() && out[i + 1] == b'\n' {
-                    final_out.append(&mut note_buffer);
-                    final_out.push(b'\n');
-                    final_out.push(b'\n');
-                    i += 2;
-                    continue;
-                }
-                note_buffer.push(b'\n');
-                i += 1;
-                continue;
-            }
-
-            // Check if at the end of note
-            if i + 1 < out.len() && b == b']' && out[i + 1] == b']' {
-                in_note = false;
-                note_buffer = Vec::new();
-                i += 2;
-                continue;
-            }
-
-            note_buffer.push(b);
-            i += 1;
-        } else {
-            // Check if at the start of a note
-            if i + 1 < out.len() && b == b'[' && out[i + 1] == b'[' {
-                in_note = true;
-                note_buffer = vec![b'[', b'['];
-                i += 2;
-                continue;
-            }
-
-            // Normal character
-            final_out.push(b);
-            i += 1;
-        }
+fn find_note_break(s: &str) -> Option<(usize, &str)> {
+    let a = s.find("\n\n").map(|i| (i, "\n\n"));
+    let b = s.find("\n \n").map(|i| (i, "\n \n"));
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
     }
-    final_out.append(&mut note_buffer);
-
-    String::from_utf8(final_out).expect("Valid UTF-8 after preprocessing")
 }
 
 #[derive(Debug, PartialEq, Eq)]
