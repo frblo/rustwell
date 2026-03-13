@@ -182,7 +182,7 @@ impl Exporter for PdfExporter {
             bold_italic: Font::new(bold_italic_data.into(), 0).unwrap(),
         };
 
-        self.generate_pdf(&mut document, &A4, screenplay, &fonts);
+        self.generate_pdf(&mut document, &A4, screenplay, &fonts)?;
 
         let pdf = document
             .finish()
@@ -205,7 +205,7 @@ impl PdfExporter {
         size: &PaperSize,
         screenplay: &Screenplay,
         fonts: &Fonts,
-    ) {
+    ) -> std::io::Result<()> {
         let mut screenplay_element_idx = 0;
 
         let mut page_idx = 0;
@@ -225,21 +225,36 @@ impl PdfExporter {
             let mut surface = page.surface();
             let mut line_idx = 0;
 
-            if page_idx > 0 {
+            if (screenplay.titlepage.is_none() && page_idx > 0)
+                || (screenplay.titlepage.is_some() && page_idx > 1)
+            {
                 let residual_page_number = write_element_custom_top_margin(
                     size,
-                    &format!("{}.", page_idx + 1).into(),
+                    &format!(
+                        "{}.",
+                        if screenplay.titlepage.is_some() {
+                            page_idx
+                        } else {
+                            page_idx + 1
+                        }
+                    )
+                    .into(),
                     &MARGINS.page_number,
                     &mut 0,
                     &mut 0,
-                    2,
+                    1,
                     &mut surface,
                     fonts,
                     Alignment::RightToLeft,
                     36,
-                );
+                )?;
 
-                assert!(residual_page_number.is_none());
+                if residual_page_number.is_some() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "There cannot be more pages than the number which fits on a page.",
+                    ));
+                }
             }
 
             loop {
@@ -272,6 +287,7 @@ impl PdfExporter {
                         fonts,
                         text_direction,
                     )
+                    .unwrap()
                 };
 
                 match &element {
@@ -300,7 +316,7 @@ impl PdfExporter {
                                 &mut surface,
                                 fonts,
                                 Alignment::LeftToRight,
-                            );
+                            )?;
 
                             write_element(
                                 size,
@@ -312,7 +328,7 @@ impl PdfExporter {
                                 &mut surface,
                                 fonts,
                                 Alignment::RightToLeft,
-                            );
+                            )?;
                         }
                         outline.push_child(OutlineNode::new(
                             slug.to_string(),
@@ -334,7 +350,7 @@ impl PdfExporter {
                             &mut surface,
                             fonts,
                             Alignment::LeftToRight,
-                        )
+                        )?
                     }
                     Element::Action(s) => we(s, &MARGINS.action, Alignment::LeftToRight),
                     Element::Dialogue(dialogue) => {
@@ -348,7 +364,7 @@ impl PdfExporter {
                             &mut surface,
                             fonts,
                             &MARGINS.dialogue,
-                        );
+                        )?;
                         if residual_dialogue_idx.is_some() || premature_exit {
                             break;
                         }
@@ -371,7 +387,7 @@ impl PdfExporter {
                                     &mut surface,
                                     fonts,
                                     &MARGINS.dual_dialogue.left,
-                                );
+                                )?;
                         }
                         if (residual_dual_dialogue_idx.1.is_none()
                             && residual_dual_dialogue_idx.0.is_none())
@@ -388,7 +404,7 @@ impl PdfExporter {
                                     &mut surface,
                                     fonts,
                                     &MARGINS.dual_dialogue.right,
-                                );
+                                )?;
                         }
                         line_idx = line_idx.max(initial_line_index);
                         if residual_dual_dialogue_idx.0.is_some()
@@ -418,7 +434,7 @@ impl PdfExporter {
                                 &mut surface,
                                 fonts,
                                 Alignment::LeftToRight,
-                            );
+                            )?;
                             surface.set_fill(None);
                         }
                     }
@@ -437,6 +453,8 @@ impl PdfExporter {
             page_idx += 1;
         }
         document.set_outline(outline);
+
+        Ok(())
     }
 }
 
@@ -450,7 +468,7 @@ fn write_dialogue(
     surface: &mut Surface,
     fonts: &Fonts,
     dialogue_margins: &DialogueMargins,
-) -> bool {
+) -> std::io::Result<bool> {
     let mut character_name = dialogue.character.clone();
     match (*residual_dialogue, &dialogue.extension) {
         (Some(_), _) => {
@@ -470,9 +488,15 @@ fn write_dialogue(
     );
     let name_lines_count = break_points(&character_name, span).len() + 1;
     if *line_index + name_lines_count + 1 >= max_lines {
-        return true;
+        return Ok(true);
     }
-    assert!(name_lines_count < max_lines);
+
+    if name_lines_count >= max_lines {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Character name cannot be longer than a whole page.",
+        ));
+    }
 
     write_element(
         size,
@@ -484,7 +508,7 @@ fn write_dialogue(
         surface,
         fonts,
         Alignment::LeftToRight,
-    );
+    )?;
 
     let mut dialogue_index = residual_dialogue.unwrap_or(0);
     while dialogue_index < dialogue.elements.len() {
@@ -500,9 +524,9 @@ fn write_dialogue(
                 surface,
                 fonts,
                 Alignment::LeftToRight,
-            );
+            )?;
 
-            return false;
+            return Ok(false);
         }
         let mut breakpoint_index = match *residual_index {
             Some(i) => {
@@ -524,7 +548,7 @@ fn write_dialogue(
                     surface,
                     fonts,
                     Alignment::LeftToRight,
-                )
+                )?
             }
             DialogueElement::Line(s) => {
                 *residual_index = write_element(
@@ -537,7 +561,7 @@ fn write_dialogue(
                     surface,
                     fonts,
                     Alignment::LeftToRight,
-                )
+                )?
             }
         }
 
@@ -549,7 +573,7 @@ fn write_dialogue(
     }
 
     *residual_dialogue = None;
-    false
+    Ok(false)
 }
 
 fn write_element(
@@ -562,7 +586,7 @@ fn write_element(
     surface: &mut Surface,
     fonts: &Fonts,
     text_direction: Alignment,
-) -> Option<usize> {
+) -> std::io::Result<Option<usize>> {
     write_element_custom_top_margin(
         size,
         content,
@@ -588,14 +612,14 @@ fn write_element_custom_top_margin(
     fonts: &Fonts,
     text_direction: Alignment,
     top_margin: usize,
-) -> Option<usize> {
+) -> std::io::Result<Option<usize>> {
     let left_margin = margin.left;
     let right_margin = margin.right;
     let span = glyph_span(size, left_margin, right_margin);
     let breakpoints = break_points(content, span);
     while *breakpoint_index <= breakpoints.len() {
         if *line_index >= max_lines {
-            return Some(*breakpoint_index);
+            return Ok(Some(*breakpoint_index));
         }
 
         let start_index = if *breakpoint_index == 0 {
@@ -614,11 +638,11 @@ fn write_element_custom_top_margin(
             text_direction,
             size,
             margin,
-        );
+        )?;
         *breakpoint_index += 1;
         *line_index += 1;
     }
-    None
+    Ok(None)
 }
 
 fn write_line(
@@ -632,14 +656,19 @@ fn write_line(
     text_direction: Alignment,
     size: &PaperSize,
     margin: &Margin,
-) {
+) -> std::io::Result<()> {
     match content.get_char(start_index) {
         Some(c) => {
             if c == '\n' {
                 start_index += 1
             }
         }
-        None => todo!(),
+        None => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Could not get character from source.",
+            ));
+        }
     }
 
     let (breakpoint_index, break_word) = match breakpoint {
@@ -665,7 +694,12 @@ fn write_line(
     while start_index < breakpoint_index {
         let (string_element, relative_index) = match content.get_element_from_index(start_index) {
             Some(res) => res,
-            None => todo!(),
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Could not get rich string element.",
+                ));
+            }
         };
 
         let element_length = string_element.text.chars().count();
@@ -712,6 +746,8 @@ fn write_line(
             krilla::text::TextDirection::LeftToRight,
         );
     }
+
+    Ok(())
 }
 
 fn glyph_span(size: &PaperSize, left_margin: f32, right_margin: f32) -> usize {
