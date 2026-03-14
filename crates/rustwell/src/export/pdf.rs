@@ -343,7 +343,7 @@ impl PdfExporter {
 
                             write_element(
                                 size,
-                                &rich_number,
+                                rich_number,
                                 &left_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
@@ -355,7 +355,7 @@ impl PdfExporter {
 
                             write_element(
                                 size,
-                                &rich_number,
+                                rich_number,
                                 &right_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
@@ -569,7 +569,7 @@ fn write_dialogue(
             DialogueElement::Parenthetical(s) => {
                 *residual_index = write_element(
                     size,
-                    &s,
+                    s,
                     &dialogue_margins.parenthetical,
                     &mut breakpoint_index,
                     line_index,
@@ -582,7 +582,7 @@ fn write_dialogue(
             DialogueElement::Line(s) => {
                 *residual_index = write_element(
                     size,
-                    &s,
+                    s,
                     &dialogue_margins.line,
                     &mut breakpoint_index,
                     line_index,
@@ -789,7 +789,7 @@ fn write_line(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
             fonts.regular.clone(),
             FONT_SIZE as f32,
-            "-".into(),
+            "-",
             false,
             krilla::text::TextDirection::LeftToRight,
         );
