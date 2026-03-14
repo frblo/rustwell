@@ -27,6 +27,10 @@ struct Cli {
     #[arg(short = 't', long = "target", value_enum)]
     target: Option<Target>,
 
+    /// Paper size specific for pdf output
+    #[arg(short = 'p', long = "papersize", value_enum)]
+    papersize: Option<PaperSize>,
+
     /// Alias for stdout (same as `-o -`)
     #[arg(long = "stdout")]
     stdout: bool,
@@ -40,6 +44,12 @@ struct Cli {
 enum Target {
     Html,
     Pdf,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PaperSize {
+    A4,
+    Letter,
 }
 
 fn main() -> Result<()> {
@@ -74,6 +84,7 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
         }),
         Target::Pdf => Box::new(PdfExporter {
             synopses: cli.synopses,
+            paper_size: decide_paper_size(cli.papersize),
             ..Default::default()
         }),
     }
@@ -134,4 +145,12 @@ fn detect_name_from_path(path: &str) -> Result<&str> {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or_default())
+}
+
+fn decide_paper_size(size: Option<PaperSize>) -> rustwell::PaperSize {
+    match size {
+        Some(PaperSize::A4) => rustwell::A4,
+        Some(PaperSize::Letter) => rustwell::LETTER,
+        None => rustwell::PaperSize::default(),
+    }
 }

@@ -42,6 +42,9 @@ pub use screenplay::Screenplay;
 pub use export::Exporter;
 pub use export::ExporterExt;
 pub use export::html::HtmlExporter;
+pub use export::pdf::A4;
+pub use export::pdf::LETTER;
+pub use export::pdf::PaperSize;
 pub use export::pdf::PdfExporter;
 
 /// Parses a Fountain source string into a [Screenplay] structure.
