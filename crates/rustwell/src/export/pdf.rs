@@ -16,7 +16,7 @@ use krilla::{
 use crate::{
     Exporter, Screenplay,
     rich_string::RichString,
-    screenplay::{Dialogue, DialogueElement, Element},
+    screenplay::{Dialogue, DialogueElement, Element, TitlePage},
 };
 
 const FONT_SIZE: usize = 12; // standard screenplay size
@@ -244,6 +244,11 @@ impl PdfExporter {
         let mut residual_dual_breakpoint_idx = (None, None);
 
         let mut outline = Outline::new();
+
+        if let Some(t) = &screenplay.titlepage {
+            page_idx += 1;
+            write_titlepage(size, t, max_lines_per_page, document, fonts)?;
+        }
 
         while screenplay_element_idx < screenplay.elements.len() {
             let mut page = document
@@ -790,6 +795,140 @@ fn write_line(
         );
     }
 
+    Ok(())
+}
+
+// pub title: Vec<RichString>,
+// pub credit: Vec<RichString>,
+// pub authors: Vec<RichString>,
+// pub source: Vec<RichString>,
+// pub draft_date: Vec<RichString>,
+// pub contact: Vec<RichString>,
+struct TitlePageMargins {
+    pub title: Margin,
+    pub credit: Margin,
+    pub authors: Margin,
+    pub source: Margin,
+    pub draft_date: Margin,
+    pub contact: Margin,
+}
+
+const TITLE_PAGE_MARGINS: TitlePageMargins = TitlePageMargins {
+    title: Margin {
+        left: 72.0,
+        right: 72.0,
+    },
+    credit: Margin {
+        left: 72.0,
+        right: 72.0,
+    },
+    authors: Margin {
+        left: 72.0,
+        right: 72.0,
+    },
+    source: Margin {
+        left: 72.0,
+        right: 72.0,
+    },
+    draft_date: Margin {
+        left: 315.0,
+        right: 72.0,
+    },
+    contact: Margin {
+        left: 72.0,
+        right: 315.0,
+    },
+};
+
+fn write_titlepage(
+    size: &PaperSize,
+    titlepage: &TitlePage,
+    max_lines: usize,
+    document: &mut Document,
+    fonts: &FontFamily,
+) -> std::io::Result<()> {
+    let mut page =
+        document.start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
+    let mut surface = page.surface();
+
+    let mut line_idx = max_lines / 3;
+
+    macro_rules! write_title_element {
+        ($element:ident) => {
+            if !titlepage.$element.is_empty() {
+                for s in &titlepage.$element {
+                    let residual = write_element(
+                        size,
+                        s,
+                        &TITLE_PAGE_MARGINS.$element,
+                        &mut 0,
+                        &mut line_idx,
+                        max_lines,
+                        &mut surface,
+                        fonts,
+                        Alignment::Centered,
+                    )?;
+
+                    if residual.is_some() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Title page cannot be longer than a single page.",
+                        ));
+                    }
+                }
+                line_idx += 1;
+            }
+        };
+        ($element:ident, $alignment:expr) => {
+            if !titlepage.$element.is_empty() {
+                let mut total_lines = titlepage.$element.len();
+                for s in &titlepage.$element {
+                    total_lines += break_points(
+                        s,
+                        glyph_span(
+                            size,
+                            TITLE_PAGE_MARGINS.$element.left,
+                            TITLE_PAGE_MARGINS.$element.right,
+                        ),
+                    )
+                    .len();
+
+                    if total_lines > max_lines {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Title page cannot be longer than a single page.",
+                        ));
+                    }
+                }
+                line_idx = max_lines - total_lines;
+
+                for s in &titlepage.$element {
+                    write_element(
+                        size,
+                        s,
+                        &TITLE_PAGE_MARGINS.$element,
+                        &mut 0,
+                        &mut line_idx,
+                        max_lines,
+                        &mut surface,
+                        fonts,
+                        $alignment,
+                    )?;
+                }
+            }
+        };
+    }
+
+    write_title_element!(title);
+    write_title_element!(credit);
+    write_title_element!(authors);
+    write_title_element!(source);
+
+    write_title_element!(contact, Alignment::LeftToRight);
+    write_title_element!(draft_date, Alignment::RightToLeft);
+
+    surface.finish();
+    page.finish();
     Ok(())
 }
 
