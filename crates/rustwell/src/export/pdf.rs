@@ -62,7 +62,8 @@ const TOP_MARGIN: usize = 72;
 /// The margin at the bottom of a page. Applicable on every page. In points.
 const BOTTOM_MARGIN: usize = 72;
 
-/// Left- and right margins, in points.
+/// Left- and right margins, in points, going inwards - meaning left margin is relative to the left
+/// side, and the right margin is relative to the right side.
 struct Margin {
     pub left: f32,
     pub right: f32,
@@ -237,6 +238,8 @@ impl PdfExporter {
         // The maximum number of writable lines which can fit on a page, considering the top and
         // bottom margins.
         let max_lines_per_page = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
+        // If an element does not fit within a page, this will be Some(index) pointing to the which
+        // breakpoint in the breakpoint list to start at on the next page.
         let mut residual_breakpoint_idx = None;
         let mut residual_dialogue_idx = None;
 
@@ -250,6 +253,7 @@ impl PdfExporter {
             write_titlepage(size, t, max_lines_per_page, document, fonts)?;
         }
 
+        // Page loop, creates a new page and writes everything it can on it.
         while screenplay_element_idx < screenplay.elements.len() {
             let mut page = document
                 .start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
@@ -281,6 +285,7 @@ impl PdfExporter {
                     36,
                 )?;
 
+                // Page number cannot be larger than what fits on a single line on the page.
                 if residual_page_number.is_some() {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -289,6 +294,7 @@ impl PdfExporter {
                 }
             }
 
+            // Element loop, iterates through the screenplay elements.
             loop {
                 if line_idx >= max_lines_per_page {
                     break;
@@ -301,6 +307,8 @@ impl PdfExporter {
                 let element = &screenplay.elements[screenplay_element_idx];
                 let mut breakpoint_idx = match residual_breakpoint_idx {
                     Some(i) => {
+                        // If we're in a dialogue element, we need to preserve
+                        // `residual_breakpoint_idx`.
                         if !matches!(element, Element::Dialogue(_)) {
                             residual_breakpoint_idx = None;
                         }
@@ -309,6 +317,8 @@ impl PdfExporter {
                     None => 0,
                 };
 
+                /// Macro for the most common usage of write_element(...), as most types of
+                /// [`Element`]s call this function with almost identical parameters.
                 macro_rules! write_element {
                     ($content:expr, $margin:expr, $text_direction:expr) => {
                         residual_breakpoint_idx = write_element(
@@ -399,6 +409,8 @@ impl PdfExporter {
                     Element::DualDialogue(dialogue0, dialogue1) => {
                         let mut initial_line_index = line_idx;
                         let mut premature_exit = false;
+                        // Ensures dual dialogue is only written it either both have not been
+                        // written, or if this specifically is to be continued on a new page.
                         if (residual_dual_dialogue_idx.0.is_none()
                             && residual_dual_dialogue_idx.1.is_none())
                             || residual_dual_dialogue_idx.0.is_some()
@@ -486,6 +498,9 @@ impl PdfExporter {
     }
 }
 
+/// Writes a diologue [`Element`] to the `pdf` document. If a dialogue spans multiple pages it will
+/// write the character name with the extension `(cont'd)` on each new page. Returns a
+/// [Option<bool>] which is true if the whole dialogue element did not fit on the same page.
 fn write_dialogue(
     dialogue: &Dialogue,
     residual_dialogue: &mut Option<usize>,
@@ -543,6 +558,8 @@ fn write_dialogue(
     while dialogue_index < dialogue.elements.len() {
         if *line_index >= max_lines {
             *residual_dialogue = Some(dialogue_index);
+            // If a dialogue continues on the next page, writes `(MORE)` at the bottom of the
+            // current page, inside the bottom margin.
             write_element(
                 size,
                 &"(MORE)".into(),
@@ -565,34 +582,22 @@ fn write_dialogue(
             None => 0,
         };
 
-        match &dialogue.elements[dialogue_index] {
-            DialogueElement::Parenthetical(s) => {
-                *residual_index = write_element(
-                    size,
-                    s,
-                    &dialogue_margins.parenthetical,
-                    &mut breakpoint_index,
-                    line_index,
-                    max_lines,
-                    surface,
-                    fonts,
-                    Alignment::LeftToRight,
-                )?
-            }
-            DialogueElement::Line(s) => {
-                *residual_index = write_element(
-                    size,
-                    s,
-                    &dialogue_margins.line,
-                    &mut breakpoint_index,
-                    line_index,
-                    max_lines,
-                    surface,
-                    fonts,
-                    Alignment::LeftToRight,
-                )?
-            }
-        }
+        let (content, margin) = match &dialogue.elements[dialogue_index] {
+            DialogueElement::Parenthetical(s) => (s, &dialogue_margins.parenthetical),
+            DialogueElement::Line(s) => (s, &dialogue_margins.line),
+        };
+
+        *residual_index = write_element(
+            size,
+            content,
+            margin,
+            &mut breakpoint_index,
+            line_index,
+            max_lines,
+            surface,
+            fonts,
+            Alignment::LeftToRight,
+        )?;
 
         if residual_index.is_some() {
             continue;
@@ -605,6 +610,9 @@ fn write_dialogue(
     Ok(false)
 }
 
+/// Writes a [`Element`] to the `pdf` document. If it cannot fit the whole element on the page it
+/// will return [`Some`] with an index to which [`BreakPoint`] the function made it to. Calls
+/// [`write_element_custom_top_margin`] with the standard top margin.
 fn write_element(
     size: &PaperSize,
     content: &RichString,
@@ -630,6 +638,9 @@ fn write_element(
     )
 }
 
+/// Writes a [`Element`] to the `pdf` document. If it cannot fit the whole element on the page it
+/// will return [`Some`] with an index to which [`BreakPoint`] the function made it to. Allows for
+/// using a non-default top margin (for page numbers).
 fn write_element_custom_top_margin(
     size: &PaperSize,
     content: &RichString,
@@ -674,12 +685,13 @@ fn write_element_custom_top_margin(
     Ok(None)
 }
 
+/// Writes a single line (not to be confused with [`DialogueElement::Line`]) onto the page.
 fn write_line(
     surface: &mut Surface,
     mut x: f32,
     y: f32,
     content: &RichString,
-    mut start_index: usize,
+    mut start_index: usize, // the "global" index to the rich string
     breakpoint: Option<&BreakPoint>,
     fonts: &FontFamily,
     text_direction: Alignment,
@@ -687,6 +699,8 @@ fn write_line(
     margin: &Margin,
 ) -> std::io::Result<()> {
     match content.get_char(start_index) {
+        // Newlines are handled as part of the layout engine, so it should never write ut a newline
+        // character.
         Some(c) => {
             if c == '\n' {
                 start_index += 1
@@ -705,6 +719,8 @@ fn write_line(
         None => (content.len(), false),
     };
 
+    // If we use a nonstandard [`Alignment`] we must move the `x` value of which we start writing
+    // the line on.
     match text_direction {
         Alignment::LeftToRight => (),
         Alignment::RightToLeft => {
@@ -719,7 +735,9 @@ fn write_line(
         }
     }
 
+    // Keeps track of the position on the line which the writer is currently at.
     let mut glyph_index = 0;
+    // Writes until reaching the breakpoint position.
     while start_index < breakpoint_index {
         let (string_element, relative_index) = match content.get_element_from_index(start_index) {
             Some(res) => res,
@@ -733,6 +751,7 @@ fn write_line(
 
         let element_length = string_element.text.chars().count();
 
+        // The local index in the rich string element at which to break the line.
         let relative_break_index =
             if breakpoint_index - start_index >= element_length - relative_index {
                 element_length
@@ -763,6 +782,7 @@ fn write_line(
 
         let glyphs_written = relative_break_index - relative_index;
 
+        // Draws a line under the characters (to create an underline effect).
         if string_element.is_underline() {
             let underline = {
                 let mut pb = PathBuilder::new();
@@ -784,6 +804,7 @@ fn write_line(
         start_index += glyphs_written;
     }
 
+    // Adds a `-` at the end of a line if the linebreak took place inside a word.
     if break_word {
         surface.draw_text(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
@@ -798,12 +819,7 @@ fn write_line(
     Ok(())
 }
 
-// pub title: Vec<RichString>,
-// pub credit: Vec<RichString>,
-// pub authors: Vec<RichString>,
-// pub source: Vec<RichString>,
-// pub draft_date: Vec<RichString>,
-// pub contact: Vec<RichString>,
+/// Margins for the [`TitlePage`] elements.
 struct TitlePageMargins {
     pub title: Margin,
     pub credit: Margin,
@@ -813,6 +829,7 @@ struct TitlePageMargins {
     pub contact: Margin,
 }
 
+/// Standard margins for the [`TitlePage`] elements.
 const TITLE_PAGE_MARGINS: TitlePageMargins = TitlePageMargins {
     title: Margin {
         left: 72.0,
@@ -840,6 +857,8 @@ const TITLE_PAGE_MARGINS: TitlePageMargins = TitlePageMargins {
     },
 };
 
+/// Writes the [`TitlePage`] to the `pdf` document. Fails if everything does not fit on one page,
+/// but allows for overlapping contact information and draft dates with the rest of the elements.
 fn write_titlepage(
     size: &PaperSize,
     titlepage: &TitlePage,
@@ -853,7 +872,10 @@ fn write_titlepage(
 
     let mut line_idx = max_lines / 3;
 
+    /// Writes the [`TitlePage`] elements using the [`write_element`] function. Will add newlines
+    /// between each type of element, as per (some) standards.
     macro_rules! write_title_element {
+        // For the elements which are centered an written below each other.
         ($element:ident) => {
             if !titlepage.$element.is_empty() {
                 for s in &titlepage.$element {
@@ -879,6 +901,7 @@ fn write_titlepage(
                 line_idx += 1;
             }
         };
+        // For elements which have specific alignments and are written from the bottom up.
         ($element:ident, $alignment:expr) => {
             if !titlepage.$element.is_empty() {
                 let mut total_lines = titlepage.$element.len();
@@ -932,22 +955,34 @@ fn write_titlepage(
     Ok(())
 }
 
+/// Calculates the span in a margin. Returns how many characters with the standard font width will
+/// fit between the left and right margin.
 fn glyph_span(size: &PaperSize, left_margin: f32, right_margin: f32) -> usize {
     ((size.x as f32 - (left_margin + right_margin)) / FONT_WIDTH) as usize
 }
 
+/// The different ways to break a line into multiple lines.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 enum BreakType {
+    /// Standard type of line break, by just adding a newline somewhere.
     NewLine,
+    /// Break the line by adding a newline inside a word.
     BreakWord,
 }
 
+/// Where in the string a line break should occur.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct BreakPoint {
     pub index: usize,
+    /// If it should add a newline after a word, or inside a word.
     pub break_type: BreakType,
 }
 
+/// Given a [`RichString`] and a number of allowed glyphs on a single line, calculates where
+/// eventual [`BreakPoint`]s should be placed in the string.
+///
+/// Greedily places [`BreakPoint`]s. Will only place one inside a word if the word does not fit on
+/// a line by itself. Respects newline characters in the string.
 fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
     debug_assert!(span >= 2);
 

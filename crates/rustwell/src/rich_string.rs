@@ -14,7 +14,7 @@
 //! assert!(rs.elements[1].is_bold());
 //! ```
 
-use std::str::Chars;
+use std::{fmt::Display, str::Chars};
 
 use bitflags::bitflags;
 
@@ -66,6 +66,8 @@ impl RichString {
         len
     }
 
+    /// Gets a [`char`] from a "global" index, meaning the index when viewing the [`RichString`] as
+    /// a single string without any style attributes taken into account.
     pub fn get_char(&self, mut index: usize) -> Option<char> {
         if index >= self.len() {
             return None;
@@ -80,6 +82,8 @@ impl RichString {
         None
     }
 
+    /// Given a "global" index, gets the [`Element`] which contains it, and the "local" index
+    /// pointing to that character in the element.
     pub fn get_element_from_index(&self, mut index: usize) -> Option<(&Element, usize)> {
         if index >= self.len() {
             return None;
@@ -94,6 +98,8 @@ impl RichString {
         None
     }
 
+    /// Creates an [char] iterator over the [`RichString`], without the style attributes of each
+    /// [char] taken into account.
     pub fn iter(&'_ self) -> RichIterator<'_> {
         RichIterator {
             rich_string: self,
@@ -102,6 +108,8 @@ impl RichString {
         }
     }
 
+    /// Appends a [`RichString`] to self. Will not merge the last [`Element`] of self, and the
+    /// first of the other even if they have the same style attributes.
     pub fn append(&mut self, mut other: Self) {
         self.elements.append(&mut other.elements);
     }
@@ -186,20 +194,22 @@ impl RichString {
 
         self.elements.push(Element { text, attributes });
     }
-
-    pub fn to_string(&self) -> String {
-        let mut str = String::with_capacity(self.len());
-        for element in &self.elements {
-            str.push_str(&element.text);
-        }
-
-        str
-    }
 }
 
 impl Default for RichString {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Display for RichString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut str = String::with_capacity(self.len());
+        for element in &self.elements {
+            str.push_str(&element.text);
+        }
+
+        write!(f, "{str}")
     }
 }
 
@@ -214,6 +224,8 @@ where
     }
 }
 
+/// An intermediate iterator which allows for seamless iteration over the [Chars] inside a
+/// [`RichString`].
 pub struct RichIterator<'a> {
     rich_string: &'a RichString,
     element_idx: usize,
