@@ -1,3 +1,5 @@
+use std::iter::Peekable;
+
 use crate::rich_string::RichString;
 use crate::screenplay::Dialogue;
 use crate::screenplay::DialogueElement;
@@ -5,9 +7,6 @@ use crate::screenplay::Element;
 use crate::screenplay::Screenplay;
 use crate::screenplay::Span;
 use crate::screenplay::TitlePage;
-use std::iter::Enumerate;
-use std::iter::Peekable;
-use std::str::Lines;
 
 /// Parses a Fountain source string into a [`Screenplay`] structure.
 ///
@@ -31,8 +30,8 @@ use std::str::Lines;
 /// ```
 #[must_use]
 pub fn parse(src: &str) -> Screenplay {
-    let cleaned = preprocess_source(src);
-    Parser::new(&cleaned).parse()
+    let preprocessor = Preprocessor::new(src);
+    Parser::new(&preprocessor.process()).parse()
 }
 
 /// Internal parser state machine for Fountain.
@@ -493,160 +492,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Removes boneyards, notes and normalizes tabs to four spaces
-fn preprocess_source(src: &str) -> Vec<(usize, String)> {
-    let mut result: Vec<(usize, String)> = Vec::new();
-    let mut current_line = String::new();
-    let mut source_line = 1usize;
-    let mut rest = src;
-    let mut note_buffer: Option<Vec<(usize, String)>> = None;
-    let mut pre_note_line: Option<(usize, String)> = None;
-
-    macro_rules! push_ch {
-        ($ch:expr) => {
-            if $ch == '\n' {
-                if let Some(ref mut buf) = note_buffer {
-                    buf.push((source_line, std::mem::take(&mut current_line)));
-                } else {
-                    result.push((source_line, std::mem::take(&mut current_line)));
-                }
-                source_line += 1;
-            } else {
-                current_line.push($ch);
-            }
-        };
-    }
-
-    macro_rules! dump_note_buffer {
-        () => {
-            if let Some(mut buf) = note_buffer.take() {
-                if let Some((pre_ln, pre_content)) = pre_note_line.take() {
-                    if buf.is_empty() {
-                        // Prepend pre_note_line to current_line
-                        let note_tail = std::mem::take(&mut current_line);
-                        current_line = pre_content + &note_tail;
-                        result.push((pre_ln, std::mem::take(&mut current_line)));
-                    } else {
-                        // Prepend pre_note_line to first buf entry
-                        buf[0].1 = pre_content + &buf[0].1;
-                        buf[0].0 = pre_ln;
-                        for (ln, line) in buf {
-                            result.push((ln, line));
-                        }
-                        result.push((source_line, std::mem::take(&mut current_line)));
-                    }
-                }
-            }
-        };
-    }
-
-    while !rest.is_empty() {
-        let candidate = find_earliest_token_of_interest(rest, note_buffer.is_some());
-
-        match candidate {
-            None => {
-                for ch in rest.replace('\t', "    ").chars() {
-                    push_ch!(ch);
-                }
-                break;
-            }
-            Some((pos, token)) => {
-                let before = rest[..pos].replace('\t', "    ");
-                for ch in before.chars() {
-                    push_ch!(ch);
-                }
-                rest = &rest[pos + token.len()..];
-
-                match token {
-                    "/*" => {
-                        let (boneyard, after) = match rest.find("*/") {
-                            Some(end) => (&rest[..end], &rest[end + 2..]),
-                            None => (rest, ""),
-                        };
-                        let newline_count = boneyard.chars().filter(|&c| c == '\n').count();
-                        let line_start = current_line.is_empty();
-
-                        if line_start {
-                            let open_line = source_line;
-                            source_line += newline_count;
-                            if note_buffer.is_some() {
-                                dump_note_buffer!();
-                            } else {
-                                result.push((open_line, String::new()));
-                            }
-                        } else {
-                            source_line += newline_count;
-                        }
-                        rest = after;
-                    }
-                    "[[" => {
-                        pre_note_line = Some((source_line, std::mem::take(&mut current_line)));
-                        current_line.push_str("[[");
-                        note_buffer = Some(vec![]);
-                    }
-                    "]]" => {
-                        note_buffer = None;
-                        current_line = pre_note_line.take().map(|(_, s)| s).unwrap_or_default();
-                    }
-                    "\n\n" | "\n \n" => {
-                        dump_note_buffer!();
-                        for ch in token.chars() {
-                            if ch == '\n' {
-                                result.push((source_line, std::mem::take(&mut current_line)));
-                                source_line += 1;
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-        }
-    }
-
-    dump_note_buffer!();
-
-    if !current_line.is_empty() {
-        result.push((source_line, current_line));
-    }
-
-    result
-}
-
-fn find_earliest_token_of_interest(s: &str, in_note: bool) -> Option<(usize, &str)> {
-    let next_boneyard = s.find("/*");
-    let next_note = if !in_note { s.find("[[") } else { None };
-    let next_note_end = if in_note { s.find("]]") } else { None };
-    let next_note_break = if in_note { find_note_break(s) } else { None };
-
-    let mut candidates: Vec<(usize, &str)> = Vec::new();
-    if let Some(p) = next_boneyard {
-        candidates.push((p, "/*"));
-    }
-    if let Some(p) = next_note {
-        candidates.push((p, "[["));
-    }
-    if let Some(p) = next_note_end {
-        candidates.push((p, "]]"));
-    }
-    if let Some((p, pat)) = next_note_break {
-        candidates.push((p, pat));
-    }
-
-    candidates.sort_by_key(|&(p, _)| p);
-    candidates.into_iter().next()
-}
-
-fn find_note_break(s: &str) -> Option<(usize, &str)> {
-    let a = s.find("\n\n").map(|i| (i, "\n\n"));
-    let b = s.find("\n \n").map(|i| (i, "\n \n"));
-    match (a, b) {
-        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 /// The different states the state machine can be in.
 enum State {
@@ -655,233 +500,506 @@ enum State {
     InBlock,
 }
 
+/// Removes boneyards, notes and normalizes tabs to four spaces
+struct Preprocessor<'a> {
+    result: Vec<(usize, String)>,
+    current_line: (usize, String),
+    source_line: usize,
+    note_state: Option<NoteState>,
+    rest: &'a str,
+}
+
+impl<'a> Preprocessor<'a> {
+    fn new(src: &'a str) -> Self {
+        Preprocessor {
+            result: Vec::new(),
+            current_line: (1, String::new()),
+            source_line: 1,
+            note_state: None,
+            rest: src,
+        }
+    }
+
+    fn push_str(&mut self, s: &str) {
+        let mut lines = s.split('\n');
+        if let Some(first) = lines.next() {
+            self.current_line.1.push_str(first);
+        }
+
+        for segment in lines {
+            if let Some(NoteState {
+                buffer,
+                pre_line: _,
+                last_char_is_newline: _,
+            }) = &mut self.note_state
+            {
+                buffer.push(std::mem::take(&mut self.current_line));
+            } else {
+                self.result.push(std::mem::take(&mut self.current_line));
+            }
+            self.source_line += 1;
+            self.current_line.0 = self.source_line;
+            self.current_line.1.push_str(segment);
+        }
+    }
+
+    fn dump_note_buffer(&mut self) {
+        if let Some(NoteState {
+            mut buffer,
+            pre_line,
+            last_char_is_newline: _,
+        }) = self.note_state.take()
+        {
+            let pre_ln = pre_line.0;
+            let pre_content = pre_line.1;
+
+            if buffer.is_empty() {
+                let note_tail = std::mem::take(&mut self.current_line.1);
+                self.current_line = (pre_ln, pre_content + &note_tail);
+            } else {
+                buffer[0].1 = pre_content + &buffer[0].1;
+                buffer[0].0 = pre_ln;
+                for (ln, line) in buffer {
+                    self.result.push((ln, line));
+                }
+            }
+        }
+    }
+
+    fn process(mut self) -> Vec<(usize, String)> {
+        while !self.rest.is_empty() {
+            let in_note = self.note_state.is_some();
+
+            match Preprocessor::find_earliest_token_of_interest(self.rest, in_note) {
+                None => {
+                    let remaining = self.rest.replace('\t', "    ");
+                    self.push_str(&remaining);
+                    break;
+                }
+                Some((pos, token)) => {
+                    let before = self.rest[..pos].replace('\t', "    ");
+                    self.push_str(&before);
+                    self.rest = &self.rest[pos + token.len()..];
+
+                    match token {
+                        "/*" => {
+                            let (boneyard, after) = match self.rest.find("*/") {
+                                Some(end) => (&self.rest[..end], &self.rest[end + 2..]),
+                                None => (self.rest, ""),
+                            };
+                            let newline_count = boneyard.chars().filter(|&c| c == '\n').count();
+                            self.source_line += newline_count;
+
+                            self.rest = after;
+                        }
+                        "[[" => {
+                            self.note_state = Some(NoteState {
+                                buffer: vec![],
+                                pre_line: std::mem::take(&mut self.current_line),
+                                last_char_is_newline: false,
+                            });
+                            self.current_line = (self.source_line, "[[".to_string());
+                        }
+                        "]]" => {
+                            self.current_line = self
+                                .note_state
+                                .take()
+                                .map_or((self.source_line, String::new()), |n| n.pre_line);
+                        }
+                        "\n" => {
+                            let Some(s) = &mut self.note_state else {
+                                unreachable!(
+                                    "We only look for this pattern when note state is some."
+                                );
+                            };
+
+                            if s.last_char_is_newline
+                                && (pos == 0
+                                    || pos == 1 && matches!(before.chars().next(), Some(' ')))
+                            {
+                                self.dump_note_buffer();
+                            } else {
+                                s.last_char_is_newline = true;
+                            }
+                            self.push_str("\n");
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+        }
+
+        self.dump_note_buffer();
+        if !self.current_line.1.is_empty() {
+            self.result.push(self.current_line);
+        }
+        self.result
+    }
+
+    fn find_earliest_token_of_interest(s: &str, in_note: bool) -> Option<(usize, &str)> {
+        let next_boneyard = s.find("/*");
+        let next_note = if !in_note { s.find("[[") } else { None };
+        let next_note_end = if in_note { s.find("]]") } else { None };
+        let next_note_break = if in_note { s.find('\n') } else { None };
+
+        let mut candidates: Vec<(usize, &str)> = Vec::new();
+        if let Some(p) = next_boneyard {
+            candidates.push((p, "/*"));
+        }
+        if let Some(p) = next_note {
+            candidates.push((p, "[["));
+        }
+        if let Some(p) = next_note_end {
+            candidates.push((p, "]]"));
+        }
+        if let Some(p) = next_note_break {
+            candidates.push((p, "\n"));
+        }
+
+        candidates.into_iter().min_by_key(|&(p, _)| p)
+    }
+}
+
+struct NoteState {
+    buffer: Vec<(usize, String)>,
+    pre_line: (usize, String),
+    last_char_is_newline: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    macro_rules! test_screenplay {
-        ($name:ident, $input:expr, [$($elem:expr),*]) => {
-            #[test]
-            fn $name() {
-            test_parse($input, [$($elem),*]);
-            }
-        };
-    }
+    mod preprocessor {
+        use super::*;
 
-    fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = Element>) {
-        let parsed = parse(input);
-        for (
-            Span {
-                start_line: _,
-                end_line: _,
-                inner: actual,
-            },
-            expected,
-        ) in parsed.elements.iter().zip(expected)
-        {
-            assert_eq!(actual, &expected);
+        macro_rules! test_preprocessor {
+            ($name:ident, $src:expr, [$(($line:expr, $expected:expr)),*]) => {
+                #[test]
+                fn $name() {
+                assert_eq!(
+                Preprocessor::new($src).process(),
+                vec![$(($line, $expected.to_string())),*]
+                );
+                }
+            };
         }
+
+        test_preprocessor!(trivial, "Hello\nWorld", [(1, "Hello"), (2, "World")]);
+
+        test_preprocessor!(
+            boneyard_mid_line,
+            "Hello /* removed */ World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            boneyard_line_start,
+            "Hello\n/* removed */\nWorld",
+            [(1, "Hello"), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            boneyard_multiline_line_start,
+            "Hello\n/* multi\nline\nboneyard */\nWorld",
+            [(1, "Hello"), (2, ""), (5, "World")]
+        );
+
+        test_preprocessor!(
+            boneyard_multiline_mid_line,
+            "Hello /* multi\nline */ World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            note_removed,
+            "Hello [[a note]] World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            note_multiline_removed,
+            "Hello [[a\nnote]] World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            note_break_double_newline,
+            "Hello [[a note\n\nWorld",
+            [(1, "Hello [[a note"), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            note_break_single_space_newline,
+            "Hello [[a note\n \nWorld",
+            [(1, "Hello [[a note"), (2, " "), (3, "World")]
+        );
+
+        test_preprocessor!(
+            not_note_break_single_letter_newline,
+            "Hello [[a note,\na\nWorld",
+            [(1, "Hello [[a note,"), (2, "a"), (3, "World")]
+        );
+
+        test_preprocessor!(note_unclosed, "Hello [[a note", [(1, "Hello [[a note")]);
+
+        test_preprocessor!(
+            note_with_boneyard_inside,
+            "Hello [[a /* b1 */ note /* b2 */ here]] World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            boneyard_inside_note_breaks_note,
+            "Hello [[a note\n/* boneyard */\nWorld",
+            [(1, "Hello [[a note"), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            mixed_boneyard_and_note,
+            "/* boneyard */\n[[a note]]\nWorld",
+            [(1, ""), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            source_lines_preserved_after_boneyard,
+            "Line1\n/*\n\n\n*/\nLine2",
+            [(1, "Line1"), (2, ""), (6, "Line2")]
+        );
+
+        test_preprocessor!(
+            source_lines_preserved_after_note,
+            "Line1\n[[a\nmultiline\nnote]]\nLine2",
+            [(1, "Line1"), (2, ""), (5, "Line2")]
+        );
     }
 
-    test_screenplay!(
-        parses_heading_without_number,
-        "InT. OUTSIDE - DAY",
-        [Element::Heading {
-            slug: "InT. OUTSIDE - DAY".into(),
-            number: None,
-        }]
-    );
+    mod end_to_end_parse {
+        use super::*;
 
-    test_screenplay!(
-        parses_heading_with_number,
-        "INT. OUTSIDE - DAY #S.1#",
-        [Element::Heading {
-            slug: "INT. OUTSIDE - DAY".into(),
-            number: Some("S.1".to_string()),
-        }]
-    );
+        macro_rules! test_screenplay {
+            ($name:ident, $input:expr, [$($elem:expr),*]) => {
+                #[test]
+                fn $name() {
+                test_parse($input, [$($elem),*]);
+                }
+            };
+        }
 
-    test_screenplay!(
-        parses_heading_forced,
-        ".OUTSIDE - DAY",
-        [Element::Heading {
-            slug: "OUTSIDE - DAY".into(),
-            number: None,
-        }]
-    );
+        fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = Element>) {
+            let parsed = parse(input);
+            for (
+                Span {
+                    start_line: _,
+                    end_line: _,
+                    inner: actual,
+                },
+                expected,
+            ) in parsed.elements.iter().zip(expected)
+            {
+                assert_eq!(actual, &expected);
+            }
+        }
 
-    test_screenplay!(
-        parses_heading_forced_with_number,
-        ".OUTSIDE - DAY #S.1#",
-        [Element::Heading {
-            slug: "OUTSIDE - DAY".into(),
-            number: Some("S.1".to_string()),
-        }]
-    );
+        test_screenplay!(
+            parses_heading_without_number,
+            "InT. OUTSIDE - DAY",
+            [Element::Heading {
+                slug: "InT. OUTSIDE - DAY".into(),
+                number: None,
+            }]
+        );
 
-    test_screenplay!(
-        does_not_parse_heading_whitout_dot,
-        "Intro music plays.",
-        [Element::Action("Intro music plays.".into())]
-    );
+        test_screenplay!(
+            does_not_parse_heading_whitout_dot,
+            "Intro music plays.",
+            [Element::Action("Intro music plays.".into())]
+        );
 
-    test_screenplay!(
-        parses_action,
-        "They look at the test output - it's all failing.",
-        [Element::Action(
-            "They look at the test output - it's all failing.".into()
-        )]
-    );
+        test_screenplay!(
+            parses_heading_with_number,
+            "INT. OUTSIDE - DAY #S.1#",
+            [Element::Heading {
+                slug: "INT. OUTSIDE - DAY".into(),
+                number: Some("S.1".to_string()),
+            }]
+        );
 
-    test_screenplay!(
-        parses_action_forced,
-        "!INT. They look at the test output - it's all failing.",
-        [Element::Action(
-            "INT. They look at the test output - it's all failing.".into(),
-        )]
-    );
+        test_screenplay!(
+            parses_heading_forced,
+            ".OUTSIDE - DAY",
+            [Element::Heading {
+                slug: "OUTSIDE - DAY".into(),
+                number: None,
+            }]
+        );
 
-    test_screenplay!(
-        parses_dialogue_without_extension,
-        r"
+        test_screenplay!(
+            parses_heading_forced_with_number,
+            ".OUTSIDE - DAY #S.1#",
+            [Element::Heading {
+                slug: "OUTSIDE - DAY".into(),
+                number: Some("S.1".to_string()),
+            }]
+        );
+
+        test_screenplay!(
+            parses_action,
+            "They look at the test output - it's all failing.",
+            [Element::Action(
+                "They look at the test output - it's all failing.".into()
+            )]
+        );
+
+        test_screenplay!(
+            parses_action_forced,
+            "!INT. They look at the test output - it's all failing.",
+            [Element::Action(
+                "INT. They look at the test output - it's all failing.".into(),
+            )]
+        );
+
+        test_screenplay!(
+            parses_dialogue_without_extension,
+            r"
 CHAR
 (sad)
 Nooo!
 (angry)
 I am angry.",
-        [Element::Dialogue(Dialogue {
-            character: "CHAR".into(),
-            extension: None,
-            elements: vec![
-                DialogueElement::Parenthetical("(sad)".into()),
-                DialogueElement::Line("Nooo!".into()),
-                DialogueElement::Parenthetical("(angry)".into()),
-                DialogueElement::Line("I am angry.".into()),
-            ],
-        })]
-    );
+            [Element::Dialogue(Dialogue {
+                character: "CHAR".into(),
+                extension: None,
+                elements: vec![
+                    DialogueElement::Parenthetical("(sad)".into()),
+                    DialogueElement::Line("Nooo!".into()),
+                    DialogueElement::Parenthetical("(angry)".into()),
+                    DialogueElement::Line("I am angry.".into()),
+                ],
+            })]
+        );
 
-    test_screenplay!(
-        parses_dialogue_with_extension,
-        r"
+        test_screenplay!(
+            parses_dialogue_with_extension,
+            r"
 CHAR (V.O)
 (sad)
 Nooo!",
-        [Element::Dialogue(Dialogue {
-            character: "CHAR".into(),
-            extension: Some("V.O".into()),
-            elements: vec![
-                DialogueElement::Parenthetical("(sad)".into()),
-                DialogueElement::Line("Nooo!".into()),
-            ],
-        })]
-    );
+            [Element::Dialogue(Dialogue {
+                character: "CHAR".into(),
+                extension: Some("V.O".into()),
+                elements: vec![
+                    DialogueElement::Parenthetical("(sad)".into()),
+                    DialogueElement::Line("Nooo!".into()),
+                ],
+            })]
+        );
 
-    test_screenplay!(
-        parses_dialogue_without_extension_forced,
-        r"
+        test_screenplay!(
+            parses_dialogue_without_extension_forced,
+            r"
 @char
 (sad)
 Nooo!
 (angry)
 I am angry.",
-        [Element::Dialogue(Dialogue {
-            character: "char".into(),
-            extension: None,
-            elements: vec![
-                DialogueElement::Parenthetical("(sad)".into()),
-                DialogueElement::Line("Nooo!".into()),
-                DialogueElement::Parenthetical("(angry)".into()),
-                DialogueElement::Line("I am angry.".into()),
-            ],
-        })]
-    );
+            [Element::Dialogue(Dialogue {
+                character: "char".into(),
+                extension: None,
+                elements: vec![
+                    DialogueElement::Parenthetical("(sad)".into()),
+                    DialogueElement::Line("Nooo!".into()),
+                    DialogueElement::Parenthetical("(angry)".into()),
+                    DialogueElement::Line("I am angry.".into()),
+                ],
+            })]
+        );
 
-    test_screenplay!(
-        parses_dialogue_with_extension_forced,
-        r"
+        test_screenplay!(
+            parses_dialogue_with_extension_forced,
+            r"
 @char (V.O)
 (sad)
 Nooo!",
-        [Element::Dialogue(Dialogue {
-            character: "char".into(),
-            extension: Some("V.O".into()),
-            elements: vec![
-                DialogueElement::Parenthetical("(sad)".into()),
-                DialogueElement::Line("Nooo!".into()),
-            ],
-        })]
-    );
+            [Element::Dialogue(Dialogue {
+                character: "char".into(),
+                extension: Some("V.O".into()),
+                elements: vec![
+                    DialogueElement::Parenthetical("(sad)".into()),
+                    DialogueElement::Line("Nooo!".into()),
+                ],
+            })]
+        );
 
-    test_screenplay!(
-        parses_dual_dialogue,
-        r"
+        test_screenplay!(
+            parses_dual_dialogue,
+            r"
 @CHaR
 (sad)
 Nooo!
 
 CHOR (V.O) ^
 YES!",
-        [Element::DualDialogue(
-            Dialogue {
-                character: "CHaR".into(),
-                extension: None,
-                elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                ],
-            },
-            Dialogue {
-                character: "CHOR".into(),
-                extension: Some("V.O".into()),
-                elements: vec![DialogueElement::Line("YES!".into())],
-            },
-        )]
-    );
+            [Element::DualDialogue(
+                Dialogue {
+                    character: "CHaR".into(),
+                    extension: None,
+                    elements: vec![
+                        DialogueElement::Parenthetical("(sad)".into()),
+                        DialogueElement::Line("Nooo!".into()),
+                    ],
+                },
+                Dialogue {
+                    character: "CHOR".into(),
+                    extension: Some("V.O".into()),
+                    elements: vec![DialogueElement::Line("YES!".into())],
+                },
+            )]
+        );
 
-    test_screenplay!(
-        parses_lyrics,
-        "~Hey ho let's go",
-        [Element::Lyrics("Hey ho let's go".into())]
-    );
+        test_screenplay!(
+            parses_lyrics,
+            "~Hey ho let's go",
+            [Element::Lyrics("Hey ho let's go".into())]
+        );
 
-    test_screenplay!(
-        parses_transition,
-        "\nCUT TO:\n",
-        [Element::Transition("CUT TO:".into())]
-    );
+        test_screenplay!(
+            parses_transition,
+            "\nCUT TO:\n",
+            [Element::Transition("CUT TO:".into())]
+        );
 
-    test_screenplay!(
-        parses_transition_forced,
-        ">Camera does a spin",
-        [Element::Transition("Camera does a spin".into())]
-    );
+        test_screenplay!(
+            parses_transition_forced,
+            ">Camera does a spin",
+            [Element::Transition("Camera does a spin".into())]
+        );
 
-    test_screenplay!(
-        parses_centered,
-        "> The end    <",
-        [Element::CenteredText("The end".into())]
-    );
+        test_screenplay!(
+            parses_centered,
+            "> The end    <",
+            [Element::CenteredText("The end".into())]
+        );
 
-    test_screenplay!(parses_pagebreak_with_3_equals, "===", [Element::PageBreak]);
+        test_screenplay!(parses_pagebreak_with_3_equals, "===", [Element::PageBreak]);
 
-    test_screenplay!(
-        parses_pagebreak_with_8_equals,
-        "========",
-        [Element::PageBreak]
-    );
+        test_screenplay!(
+            parses_pagebreak_with_8_equals,
+            "========",
+            [Element::PageBreak]
+        );
 
-    test_screenplay!(
-        parses_synopsis,
-        "=In this scene everyone gets cake.",
-        [Element::Synopsis(
-            "In this scene everyone gets cake.".into(),
-        )]
-    );
+        test_screenplay!(
+            parses_synopsis,
+            "=In this scene everyone gets cake.",
+            [Element::Synopsis(
+                "In this scene everyone gets cake.".into(),
+            )]
+        );
 
-    test_screenplay!(
-        does_not_parse_section,
-        r"
+        test_screenplay!(
+            does_not_parse_section,
+            r"
 # Act 1
 
 INT. HOUSE
@@ -889,18 +1007,18 @@ INT. HOUSE
 ## Montage
 
 House is empty.",
-        [
-            Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            },
-            Element::Action("House is empty.".into())
-        ]
-    );
+            [
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into())
+            ]
+        );
 
-    test_screenplay!(
-        filters_out_boneyard,
-        r"
+        test_screenplay!(
+            filters_out_boneyard,
+            r"
 INT. HOUSE
 
 /* This is a boneyard
@@ -908,24 +1026,24 @@ INT. HOUSE
 , you understand?*/
 
 House is empty.",
-        [
-            Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            },
-            Element::Action("House is empty.".into())
-        ]
-    );
+            [
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into())
+            ]
+        );
 
-    test_screenplay!(
-        filters_out_boneyard_inlined,
-        "The house is /*extremely full*/empty.",
-        [Element::Action("The house is empty.".into())]
-    );
+        test_screenplay!(
+            filters_out_boneyard_inlined,
+            "The house is /*extremely full*/empty.",
+            [Element::Action("The house is empty.".into())]
+        );
 
-    test_screenplay!(
-        filters_out_boneyard_unended,
-        r"
+        test_screenplay!(
+            filters_out_boneyard_unended,
+            r"
 INT. HOUSE
 
 /* This is a boneyard
@@ -933,15 +1051,15 @@ INT. HOUSE
 , you understand?
 
 House is empty.",
-        [Element::Heading {
-            slug: "INT. HOUSE".into(),
-            number: None,
-        }]
-    );
+            [Element::Heading {
+                slug: "INT. HOUSE".into(),
+                number: None,
+            }]
+        );
 
-    test_screenplay!(
-        filters_out_note_multiline,
-        r"
+        test_screenplay!(
+            filters_out_note_multiline,
+            r"
 INT. HOUSE
 
 [[ This is a note
@@ -949,71 +1067,72 @@ INT. HOUSE
 , you understand?]]
 
 House is empty.",
-        [
-            Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            },
-            Element::Action("House is empty.".into())
-        ]
-    );
+            [
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("House is empty.".into())
+            ]
+        );
 
-    test_screenplay!(
-        filters_out_note_inlined,
-        "The house is [[should it be full?]]empty.",
-        [Element::Action("The house is empty.".into())]
-    );
+        test_screenplay!(
+            filters_out_note_inlined,
+            "The house is [[should it be full?]]empty.",
+            [Element::Action("The house is empty.".into())]
+        );
 
-    test_screenplay!(
-        filters_out_note_inlined_multiline,
-        r"
+        test_screenplay!(
+            filters_out_note_inlined_multiline,
+            r"
 INT. HOUSE
 
 The house [[ This is a note
                 and should not be parsed
 , you understand?]]is empty.",
-        [
-            Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            },
-            Element::Action("The house is empty.".into())
-        ]
-    );
+            [
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house is empty.".into())
+            ]
+        );
 
-    test_screenplay!(
-        filters_out_note_multiline_empty_newline,
-        "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.",
-        [
-            Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            },
-            Element::Action("The house is empty.".into())
-        ]
-    );
+        test_screenplay!(
+            filters_out_note_multiline_empty_newline,
+            "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.",
+            [
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house is empty.".into())
+            ]
+        );
 
-    test_screenplay!(
-        not_filters_out_unended_note_multiline,
-        r"
+        test_screenplay!(
+            not_filters_out_unended_note_multiline,
+            r"
 INT. HOUSE
 
 The house [[wow
 
 no",
-        [
-            Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            },
-            Element::Action("The house [[wow".into()),
-            Element::Action("no".into())
-        ]
-    );
+            [
+                Element::Heading {
+                    slug: "INT. HOUSE".into(),
+                    number: None,
+                },
+                Element::Action("The house [[wow".into()),
+                Element::Action("no".into())
+            ]
+        );
 
-    test_screenplay!(
-        not_filters_out_unended_note,
-        "This is [[ not right",
-        [Element::Action("This is [[ not right".into())]
-    );
+        test_screenplay!(
+            not_filters_out_unended_note,
+            "This is [[ not right",
+            [Element::Action("This is [[ not right".into())]
+        );
+    }
 }
