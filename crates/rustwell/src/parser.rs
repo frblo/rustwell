@@ -40,7 +40,7 @@ pub fn parse(src: &str) -> Screenplay {
 /// Keeps an iterator of the source, a accumulative list of [`Element`]s, and
 /// a state. Also tracks a [`TitlePage`] if such exists in the source.
 struct Parser<'a> {
-    lines: Peekable<Enumerate<Lines<'a>>>,
+    lines: Peekable<std::slice::Iter<'a, (usize, String)>>,
     state: State,
     elements: Vec<Span<Element>>,
     title_page: Option<TitlePage>,
@@ -50,9 +50,9 @@ impl<'a> Parser<'a> {
     /// Create new parser
     ///
     /// Expects `src` to have been preprocessed.
-    fn new(src: &'a str) -> Self {
+    fn new(src: &'a [(usize, String)]) -> Self {
         Self {
-            lines: src.lines().enumerate().peekable(),
+            lines: src.iter().peekable(),
             state: State::Default,
             elements: Vec::new(),
             title_page: None,
@@ -70,6 +70,7 @@ impl<'a> Parser<'a> {
     fn parse(mut self) -> Screenplay {
         self.parse_title();
         while let Some((i, line)) = self.lines.next() {
+            let i = *i;
             let trimmed = line.trim();
 
             if trimmed.is_empty() && !line.starts_with("  ") {
@@ -493,67 +494,146 @@ impl<'a> Parser<'a> {
 }
 
 /// Removes boneyards, notes and normalizes tabs to four spaces
-fn preprocess_source(src: &str) -> String {
-    let without_boneyards = remove_boneyards(src);
-    remove_notes(&without_boneyards)
-}
-
-fn remove_boneyards(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
+fn preprocess_source(src: &str) -> Vec<(usize, String)> {
+    let mut result: Vec<(usize, String)> = Vec::new();
+    let mut current_line = String::new();
+    let mut source_line = 1usize;
     let mut rest = src;
+    let mut note_buffer: Option<Vec<(usize, String)>> = None;
+    let mut pre_note_line: Option<(usize, String)> = None;
 
-    while let Some(start) = rest.find("/*") {
-        out.push_str(&rest[..start].replace('\t', "    "));
-
-        let boneyard_content = &rest[start + 2..];
-        let (boneyard, after) = match boneyard_content.find("*/") {
-            Some(end) => (&boneyard_content[..end], &boneyard_content[end + 2..]),
-            None => (boneyard_content, ""),
+    macro_rules! push_ch {
+        ($ch:expr) => {
+            if $ch == '\n' {
+                if let Some(ref mut buf) = note_buffer {
+                    buf.push((source_line, std::mem::take(&mut current_line)));
+                } else {
+                    result.push((source_line, std::mem::take(&mut current_line)));
+                }
+                source_line += 1;
+            } else {
+                current_line.push($ch);
+            }
         };
-        if let Some(_) = boneyard.find('\n') {
-            out.push('\n');
-        }
-
-        rest = after;
     }
 
-    out.push_str(&rest.replace('\t', "    "));
-    out
-}
-
-fn remove_notes(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
-    let mut rest = src;
-
-    while let Some(start) = rest.find("[[") {
-        out.push_str(&rest[..start]);
-
-        let note_content = &rest[start + 2..];
-        match note_content.find("]]") {
-            Some(close) => {
-                let inner = &note_content[..close];
-                match find_note_break(inner) {
-                    Some((break_pos, pat)) => {
-                        // Treat as unclosed: dump [[ and content up to and including break
-                        out.push_str("[[");
-                        out.push_str(&inner[..break_pos]);
-                        out.push_str(pat);
-                        rest = &note_content[break_pos + pat.len()..];
-                    }
-                    None => {
-                        rest = &note_content[close + 2..];
+    macro_rules! dump_note_buffer {
+        () => {
+            if let Some(mut buf) = note_buffer.take() {
+                if let Some((pre_ln, pre_content)) = pre_note_line.take() {
+                    if buf.is_empty() {
+                        // Prepend pre_note_line to current_line
+                        let note_tail = std::mem::take(&mut current_line);
+                        current_line = pre_content + &note_tail;
+                        result.push((pre_ln, std::mem::take(&mut current_line)));
+                    } else {
+                        // Prepend pre_note_line to first buf entry
+                        buf[0].1 = pre_content + &buf[0].1;
+                        buf[0].0 = pre_ln;
+                        for (ln, line) in buf {
+                            result.push((ln, line));
+                        }
+                        result.push((source_line, std::mem::take(&mut current_line)));
                     }
                 }
             }
+        };
+    }
+
+    while !rest.is_empty() {
+        let candidate = find_earliest_token_of_interest(rest, note_buffer.is_some());
+
+        match candidate {
             None => {
-                out.push_str("[[");
-                rest = note_content;
+                for ch in rest.replace('\t', "    ").chars() {
+                    push_ch!(ch);
+                }
+                break;
+            }
+            Some((pos, token)) => {
+                let before = rest[..pos].replace('\t', "    ");
+                for ch in before.chars() {
+                    push_ch!(ch);
+                }
+                rest = &rest[pos + token.len()..];
+
+                match token {
+                    "/*" => {
+                        let (boneyard, after) = match rest.find("*/") {
+                            Some(end) => (&rest[..end], &rest[end + 2..]),
+                            None => (rest, ""),
+                        };
+                        let newline_count = boneyard.chars().filter(|&c| c == '\n').count();
+                        let line_start = current_line.is_empty();
+
+                        if line_start {
+                            let open_line = source_line;
+                            source_line += newline_count;
+                            if note_buffer.is_some() {
+                                dump_note_buffer!();
+                            } else {
+                                result.push((open_line, String::new()));
+                            }
+                        } else {
+                            source_line += newline_count;
+                        }
+                        rest = after;
+                    }
+                    "[[" => {
+                        pre_note_line = Some((source_line, std::mem::take(&mut current_line)));
+                        current_line.push_str("[[");
+                        note_buffer = Some(vec![]);
+                    }
+                    "]]" => {
+                        note_buffer = None;
+                        current_line = pre_note_line.take().map(|(_, s)| s).unwrap_or_default();
+                    }
+                    "\n\n" | "\n \n" => {
+                        dump_note_buffer!();
+                        for ch in token.chars() {
+                            if ch == '\n' {
+                                result.push((source_line, std::mem::take(&mut current_line)));
+                                source_line += 1;
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
+                }
             }
         }
     }
 
-    out.push_str(rest);
-    out
+    dump_note_buffer!();
+
+    if !current_line.is_empty() {
+        result.push((source_line, current_line));
+    }
+
+    result
+}
+
+fn find_earliest_token_of_interest(s: &str, in_note: bool) -> Option<(usize, &str)> {
+    let next_boneyard = s.find("/*");
+    let next_note = if !in_note { s.find("[[") } else { None };
+    let next_note_end = if in_note { s.find("]]") } else { None };
+    let next_note_break = if in_note { find_note_break(s) } else { None };
+
+    let mut candidates: Vec<(usize, &str)> = Vec::new();
+    if let Some(p) = next_boneyard {
+        candidates.push((p, "/*"));
+    }
+    if let Some(p) = next_note {
+        candidates.push((p, "[["));
+    }
+    if let Some(p) = next_note_end {
+        candidates.push((p, "]]"));
+    }
+    if let Some((p, pat)) = next_note_break {
+        candidates.push((p, pat));
+    }
+
+    candidates.sort_by_key(|&(p, _)| p);
+    candidates.into_iter().next()
 }
 
 fn find_note_break(s: &str) -> Option<(usize, &str)> {
