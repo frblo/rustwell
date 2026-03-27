@@ -245,14 +245,6 @@ impl<'a> Parser<'a> {
         )
     }
 
-    #[inline]
-    fn starts_with_ascii_ci(s: &str, pat: &str) -> bool {
-        let n = pat.len();
-        s.as_bytes()
-            .get(..n)
-            .is_some_and(|head| head.eq_ignore_ascii_case(pat.as_bytes()))
-    }
-
     fn try_heading(&mut self, line: &str) -> bool {
         self.try_(
             line,
@@ -270,13 +262,16 @@ impl<'a> Parser<'a> {
                     );
                 }
 
-                // INT./EXT, INT/EXT covered by INT
-                let pats = ["INT", "EXT", "EST", "I/E"];
+                let pats = ["INT", "EXT", "EST", "I/E", "INT./EXT", "INT/EXT"];
+                let bytes = trimmed.as_bytes();
 
-                (pats
-                    .iter()
-                    .any(|p| Parser::starts_with_ascii_ci(trimmed, p))
-                    && this.next_line_is_empty())
+                (pats.iter().any(|p| {
+                    let n = p.len();
+                    bytes
+                        .get(..n)
+                        .is_some_and(|head| head.eq_ignore_ascii_case(p.as_bytes()))
+                        && bytes.get(n).is_some_and(|&end| end == b' ' || end == b'.')
+                }) && this.next_line_is_empty())
                 .then_some(trimmed)
             },
             |this, inner| {
@@ -637,6 +632,14 @@ mod tests {
     }
 
     #[test]
+    fn does_not_parse_heading_whitout_dot() {
+        let input = "Intro music plays.";
+        let correct = Screenplay::new(None, vec![Element::Action("Intro music plays.".into())]);
+
+        parser_tester(input, correct)
+    }
+
+    #[test]
     fn parses_action() {
         let input = "They look at the test output - it's all failing.";
         let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
@@ -986,13 +989,7 @@ The house [[ This is a note
 
     #[test]
     fn filters_out_note_multiline_empty_newline() {
-        let input = r"
-INT. HOUSE
-
-The house [[This is a note
-  
-                and should not be parsed
-, you understand?]]is empty.";
+        let input = "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.";
 
         let correct = Screenplay::new(
             None,
