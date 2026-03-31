@@ -6,13 +6,16 @@
 //! ```
 //! use rustwell::rich_string::RichString;
 //!
-//! let rs: RichString = "_Hello _**world!**".into();
+//! let rs: RichString = "_Hello_ **world!**".into();
 //!
-//! assert_eq!(rs.elements[0].text, "Hello ".to_string());
+//! assert_eq!(rs.elements[0].text, "Hello".to_string());
 //! assert!(rs.elements[0].is_underline());
-//! assert_eq!(rs.elements[1].text, "world!".to_string());
-//! assert!(rs.elements[1].is_bold());
+//! assert_eq!(rs.elements[1].text, " ".to_string());
+//! assert_eq!(rs.elements[2].text, "world!".to_string());
+//! assert!(rs.elements[2].is_bold());
 //! ```
+
+use std::collections::HashMap;
 
 use bitflags::bitflags;
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
@@ -20,8 +23,8 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// A string that can have different parts styled.
 ///
 /// New lines will always appear as their own non styled element.
-/// The [`RichString`] is comprised of a collection of [Element]s that each
-/// hold a [String] and a combination of stylings. The available styles are:
+/// The [`RichString`] is comprised of a collection of [`Element`]s that each
+/// hold a [`String`] and a combination of stylings. The available styles are:
 ///
 /// - `**bold**` → **bold**
 /// - `*italic*` → *italic*
@@ -43,6 +46,7 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// assert_eq!(rs.elements[1].text, "world!".to_string());
 /// assert!(rs.elements[1].is_bold());
 /// ```
+#[must_use]
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct RichString {
     pub elements: Vec<Element>,
@@ -59,69 +63,15 @@ impl RichString {
     /// Pushes a string onto the [`RichString`]. Will divide the string into
     /// multiple elements with different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
-        let s = str.as_ref();
-        let mut chars = s.chars().peekable();
-
-        let mut buf = String::new();
-        let mut attrs = Attributes::empty();
-
-        let flush = |this: &mut Self, buf: &mut String, attrs: Attributes| {
-            if !buf.is_empty() {
-                this.push_run(std::mem::take(buf), attrs);
-            }
-        };
-
-        while let Some(ch) = chars.next() {
-            match ch {
-                '*' => {
-                    flush(self, &mut buf, attrs);
-                    let mut count = 1;
-                    while count < 3 && chars.peek() == Some(&'*') {
-                        chars.next();
-                        count += 1;
-                    }
-                    match count {
-                        1 => attrs ^= Attributes::ITALIC,
-                        2 => attrs ^= Attributes::BOLD,
-                        3 => attrs ^= Attributes::ITALIC | Attributes::BOLD,
-                        _ => unreachable!("Count can't be increased further than 3"),
-                    }
-                }
-                '_' => {
-                    flush(self, &mut buf, attrs);
-                    attrs ^= Attributes::UNDERLINE;
-                }
-                '\n' => {
-                    flush(self, &mut buf, attrs);
-                    attrs = Attributes::empty();
-                    self.push_run('\n'.to_string(), Attributes::empty());
-                }
-                '\\' => {
-                    if let Some(next) = chars.next() {
-                        buf.push(next);
-                    }
-                }
-                _ => buf.push(ch),
-            }
-        }
-        flush(self, &mut buf, attrs);
+        let str = str.as_ref();
+        let (tokens, mut delimiters) = Self::tokenize(str);
+        let matches = Self::match_delimiters(&mut delimiters);
+        self.push_parsed(&tokens, &delimiters, &matches);
     }
 
-    fn push_run(&mut self, text: String, attributes: Attributes) {
-        if text.is_empty() {
-            return;
-        }
-
-        if let Some(last) = self.elements.last_mut()
-            && last.attributes == attributes
-        {
-            last.text.push_str(&text);
-            return;
-        }
-
-        self.elements.push(Element { text, attributes });
-    }
-
+    /// Creates a list of "tokens" and [`Delimiter`] runs.
+    ///
+    /// By token is meant [`&str`] slices divided at delimiters.
     fn tokenize(input: &str) -> (Vec<&str>, Vec<Delimiter>) {
         let mut tokens = Vec::new();
         let mut delimiters = Vec::new();
@@ -138,10 +88,10 @@ impl RichString {
                     }
 
                     let run_start = i;
-                    while chars.peek().map(|(_, c)| *c == ch).unwrap_or(false) {
+                    while chars.peek().is_some_and(|(_, c)| *c == ch) {
                         chars.next();
                     }
-                    let run_end = chars.peek().map(|(i, _)| *i).unwrap_or(input.len());
+                    let run_end = chars.peek().map_or(input.len(), |(i, _)| *i);
                     let after = chars.peek().map(|(_, c)| *c);
                     let count = run_end - run_start;
 
@@ -149,8 +99,8 @@ impl RichString {
                         char: ch,
                         count,
                         token_idx: tokens.len(),
-                        can_open: is_left_flanking(before, after),
-                        can_close: is_right_flanking(before, after),
+                        can_open: Self::is_left_flanking(before, after),
+                        can_close: Self::is_right_flanking(before, after),
                     });
 
                     tokens.push(&input[run_start..run_end]);
@@ -177,7 +127,13 @@ impl RichString {
         (tokens, delimiters)
     }
 
-    fn match_delimiters(delimiters: &mut Vec<Delimiter>) -> Vec<Match> {
+    /// Creates matches for a list of delimiters.
+    ///
+    /// Unlike `CommonMark`, won't create multiple nested matchings
+    /// in the naive case, that is when a delimiter run is greater than three.
+    /// Instead it will imitate the behavior by applying the appropriate
+    /// resulting style.
+    fn match_delimiters(delimiters: &mut [Delimiter]) -> Vec<Match> {
         let mut matches = Vec::new();
         let mut stack: Vec<usize> = Vec::new();
 
@@ -194,17 +150,18 @@ impl RichString {
 
                     if delimiters[opener_idx].char != delimiters[i].char
                         || delimiters[opener_idx].count == 0
-                        || !RichString::sum_of_three_rule(&delimiters[opener_idx], &delimiters[i])
+                        || !Self::sum_of_three_rule(&delimiters[opener_idx], &delimiters[i])
                     {
                         continue;
                     }
 
                     let used = delimiters[opener_idx].count.min(delimiters[i].count);
-                    let attrs = match used {
-                        1 => Attributes::ITALIC,
-                        2 => Attributes::BOLD,
+                    let attrs = match (delimiters[opener_idx].char, used) {
+                        ('_', _) => Attributes::UNDERLINE,
+                        (_, 1) => Attributes::ITALIC,
+                        (_, 2) => Attributes::BOLD,
                         _ => {
-                            if used % 2 == 0 {
+                            if used.is_multiple_of(2) {
                                 Attributes::BOLD
                             } else {
                                 Attributes::BOLD | Attributes::ITALIC
@@ -236,6 +193,57 @@ impl RichString {
         matches
     }
 
+    /// Appends the [`Element`]s created by the given tokens, delimiters, and matches.
+    ///
+    /// These three are expected to have been computed together.
+    fn push_parsed(&mut self, tokens: &[&str], delimiters: &[Delimiter], matches: &[Match]) {
+        let mut attrs: Vec<Attributes> = vec![Attributes::empty(); tokens.len()];
+
+        for m in matches {
+            let start = delimiters[m.opening_idx].token_idx;
+            let end = delimiters[m.closing_idx].token_idx;
+
+            // The delimiter tokens themselves are excluded.
+            for a in attrs.iter_mut().take(end).skip(start + 1) {
+                *a |= m.attrs;
+            }
+        }
+
+        let delimiter_token_idxs: HashMap<usize, usize> = delimiters
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (d.token_idx, i))
+            .collect();
+
+        for (i, token) in tokens.iter().enumerate() {
+            let mut token = (*token).to_string();
+            if let Some(&delimiter_idx) = delimiter_token_idxs.get(&i) {
+                let d = &delimiters[delimiter_idx];
+                if d.count == 0 {
+                    // Not included in final output. Skip the token.
+                    continue;
+                }
+
+                token = d.char.to_string().repeat(d.count);
+            }
+
+            let a = attrs[i];
+            if let Some(last) = self.elements.last_mut()
+                && last.attributes == a {
+                last.text.push_str(&token);
+                continue;
+            }
+            self.elements.push(Element {
+                text: token,
+                attributes: a,
+            });
+        }
+    }
+
+    /// Checks the sum of three rule for matching delimiter runs according
+    /// to the `CommonMark` spec.
+    ///
+    /// The rule is as follows:
     /// If one of the delimiters can both open and close strong emphasis,
     /// then the sum of the lengths of the delimiter runs containing the
     /// opening and closing delimiters must not be a multiple of 3 unless
@@ -245,15 +253,54 @@ impl RichString {
             return true;
         }
 
-        if (a.count + b.count) % 3 != 0 {
+        if !(a.count + b.count).is_multiple_of(3) {
             return true;
         }
 
-        if a.count % 3 == 0 && b.count % 3 == 0 {
+        if a.count.is_multiple_of(3) && b.count.is_multiple_of(3) {
             return true;
         }
 
         false
+    }
+
+    /// Checks if the delimiter run is left flanking and thus can open emphasis.
+    /// Follows `CommonMark` spec.
+    fn is_left_flanking(before: Option<char>, after: Option<char>) -> bool {
+        match after {
+            None => false,
+            Some(a) if Self::is_whitespace(a) => false,
+            Some(a) if Self::is_punctuation(a) => match before {
+                None => true,
+                Some(b) if Self::is_whitespace(b) || Self::is_punctuation(b) => true,
+                _ => false,
+            },
+            _ => true,
+        }
+    }
+
+    /// Checks if the delimiter run is left flanking and thus can open emphasis.
+    /// Follows `CommonMark` spec.
+    fn is_right_flanking(before: Option<char>, after: Option<char>) -> bool {
+        // right-flanking delimiter run is checked the same way as a left-flanking
+        // but going from the other direction.
+        Self::is_left_flanking(after, before)
+    }
+
+    /// Whitespace in accordance to `CommonMark` spec.
+    fn is_whitespace(char: char) -> bool {
+        match char {
+            '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{000D}' => true,
+            c => matches!(c.general_category_group(), GeneralCategoryGroup::Separator),
+        }
+    }
+
+    /// Punctuation in accordance to `CommonMark` spec.
+    fn is_punctuation(char: char) -> bool {
+        matches!(
+            char.general_category_group(),
+            GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol
+        )
     }
 }
 
@@ -276,6 +323,7 @@ where
 
 /// A [`RichString`] component, containing a [String] and the style attributes
 /// belonging to said string.
+#[must_use]
 #[derive(Debug, PartialEq, Eq, Clone, Default, Hash)]
 pub struct Element {
     pub text: String,
@@ -293,16 +341,19 @@ impl Element {
     }
 
     /// If the element is styled as bold.
+    #[must_use]
     pub fn is_bold(&self) -> bool {
         self.attributes.contains(Attributes::BOLD)
     }
 
     /// If the element is styled as underline.
+    #[must_use]
     pub fn is_underline(&self) -> bool {
         self.attributes.contains(Attributes::UNDERLINE)
     }
 
     /// If the element is styled as italic.
+    #[must_use]
     pub fn is_italic(&self) -> bool {
         self.attributes.contains(Attributes::ITALIC)
     }
@@ -332,39 +383,6 @@ struct Match {
     opening_idx: usize,
     closing_idx: usize,
     attrs: Attributes,
-}
-
-fn is_left_flanking(before: Option<char>, after: Option<char>) -> bool {
-    match after {
-        None => false,
-        Some(a) if is_whitespace(a) => false,
-        Some(a) if is_punctuation(a) => match before {
-            None => true,
-            Some(b) if is_whitespace(b) || is_punctuation(b) => true,
-            _ => false,
-        },
-        _ => true,
-    }
-}
-
-fn is_right_flanking(before: Option<char>, after: Option<char>) -> bool {
-    // right-flanking delimiter run is checked the same way as a left-flanking
-    // but going from the other direction.
-    is_left_flanking(after, before)
-}
-
-fn is_whitespace(char: char) -> bool {
-    match char {
-        '\u{0009}' | '\u{000A}' | '\u{000C}' | '\u{000D}' => true,
-        c => matches!(c.general_category_group(), GeneralCategoryGroup::Separator),
-    }
-}
-
-fn is_punctuation(char: char) -> bool {
-    matches!(
-        char.general_category_group(),
-        GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol
-    )
 }
 
 #[cfg(test)]
