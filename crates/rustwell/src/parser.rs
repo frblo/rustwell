@@ -520,6 +520,9 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
+    /// Appends the given [`&str`] to the `current_line`.
+    /// When encountering newlines it appends the `current_line` to `result`
+    /// and advances `source_line`.
     fn append_and_advance(&mut self, s: &str) {
         let mut lines = s.split('\n');
         if let Some(first) = lines.next() {
@@ -538,6 +541,8 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
+    /// Dump the note buffer into the result and leaving `current_line` as
+    /// the current line being processed.
     fn dump_note_buffer(&mut self) {
         if let Some(NoteState {
             mut buffer,
@@ -558,6 +563,7 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
+    /// The main function for the preprocessor.
     fn process(mut self) -> Vec<Line> {
         while !self.rest.is_empty() {
             let in_note = self.note_state.is_some();
@@ -628,6 +634,8 @@ impl<'a> Preprocessor<'a> {
         self.result
     }
 
+    /// Searches for the next potential token of interest.
+    /// Always looks for boneyards and other depends on if `in_note` or not.
     fn find_earliest_token_of_interest(s: &str, in_note: bool) -> Option<(usize, &str)> {
         let next_boneyard = s.find("/*");
         let next_note = if in_note { None } else { s.find("[[") };
@@ -653,8 +661,10 @@ impl<'a> Preprocessor<'a> {
     }
 }
 
+/// Type alias making it more clear what the tuple represents.
 type Line = (usize, String);
 
+/// Keeps the state needed for when we are in a note during preprocessing.
 struct NoteState {
     buffer: Vec<Line>,
     pre_line: Line,
