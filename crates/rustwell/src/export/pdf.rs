@@ -1,4 +1,4 @@
-use std::{io::Write, sync::Arc};
+use std::io::Write;
 
 use krilla::{
     Document,
@@ -191,17 +191,13 @@ impl Exporter for PdfExporter {
     /// Exports a `pdf` file and writes it to the provided writer. The pdf creation can fail if
     /// certain elements do not fit within a single page.
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
-        let regular_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[0]);
-        let bold_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[1]);
-        let italic_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[2]);
-        let bold_italic_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(FONTS[3]);
         let mut document = Document::new();
 
         let fonts = FontFamily {
-            regular: Font::new(regular_data.into(), 0).unwrap(),
-            bold: Font::new(bold_data.into(), 0).unwrap(),
-            italic: Font::new(italic_data.into(), 0).unwrap(),
-            bold_italic: Font::new(bold_italic_data.into(), 0).unwrap(),
+            regular: Font::new(FONTS[0].into(), 0).unwrap(),
+            bold: Font::new(FONTS[1].into(), 0).unwrap(),
+            italic: Font::new(FONTS[2].into(), 0).unwrap(),
+            bold_italic: Font::new(FONTS[3].into(), 0).unwrap(),
         };
 
         self.generate_pdf(&mut document, &self.paper_size, screenplay, &fonts)?;

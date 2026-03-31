@@ -13,4 +13,4 @@ path = "src/lib.rs"
 
 [dependencies]
 bitflags = "2"
-krilla = "0.6.0"
+krilla = "0.7.0"

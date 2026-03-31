@@ -390,9 +390,9 @@ checksum = "7ee5b5339afb4c41626dde77b7a611bd4f2c202b897852b4bcf5d03eddc61010"
 
 [[package]]
 name = "krilla"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ddfec86fec13d068075e14f22a7e217c281f3ed69ddcb427bf3f5d504fd674"
+checksum = "6ddd739cf930f99a70ee89ec51b21fab894b5f142dc9672e0e9a27947b2bc093"
 dependencies = [
  "base64",
  "bumpalo",
