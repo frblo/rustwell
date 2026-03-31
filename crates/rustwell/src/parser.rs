@@ -39,7 +39,7 @@ pub fn parse(src: &str) -> Screenplay {
 /// Keeps an iterator of the source, a accumulative list of [`Element`]s, and
 /// a state. Also tracks a [`TitlePage`] if such exists in the source.
 struct Parser<'a> {
-    lines: Peekable<std::slice::Iter<'a, (usize, String)>>,
+    lines: Peekable<std::slice::Iter<'a, Line>>,
     state: State,
     elements: Vec<Span<Element>>,
     title_page: Option<TitlePage>,
@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
     /// Create new parser
     ///
     /// Expects `src` to have been preprocessed.
-    fn new(src: &'a [(usize, String)]) -> Self {
+    fn new(src: &'a [Line]) -> Self {
         Self {
             lines: src.iter().peekable(),
             state: State::Default,
@@ -136,7 +136,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn try_section(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_section(&mut self, line: &str, _line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with('#').then_some(s),
@@ -502,8 +502,8 @@ enum State {
 
 /// Removes boneyards, notes and normalizes tabs to four spaces
 struct Preprocessor<'a> {
-    result: Vec<(usize, String)>,
-    current_line: (usize, String),
+    result: Vec<Line>,
+    current_line: Line,
     source_line: usize,
     note_state: Option<NoteState>,
     rest: &'a str,
@@ -520,19 +520,14 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn push_str(&mut self, s: &str) {
+    fn append_and_advance(&mut self, s: &str) {
         let mut lines = s.split('\n');
         if let Some(first) = lines.next() {
             self.current_line.1.push_str(first);
         }
 
         for segment in lines {
-            if let Some(NoteState {
-                buffer,
-                pre_line: _,
-                last_char_is_newline: _,
-            }) = &mut self.note_state
-            {
+            if let Some(NoteState { buffer, .. }) = &mut self.note_state {
                 buffer.push(std::mem::take(&mut self.current_line));
             } else {
                 self.result.push(std::mem::take(&mut self.current_line));
@@ -547,18 +542,15 @@ impl<'a> Preprocessor<'a> {
         if let Some(NoteState {
             mut buffer,
             pre_line,
-            last_char_is_newline: _,
+            ..
         }) = self.note_state.take()
         {
-            let pre_ln = pre_line.0;
-            let pre_content = pre_line.1;
-
             if buffer.is_empty() {
                 let note_tail = std::mem::take(&mut self.current_line.1);
-                self.current_line = (pre_ln, pre_content + &note_tail);
+                self.current_line = (pre_line.0, pre_line.1 + &note_tail);
             } else {
-                buffer[0].1 = pre_content + &buffer[0].1;
-                buffer[0].0 = pre_ln;
+                buffer[0].1 = pre_line.1 + &buffer[0].1;
+                buffer[0].0 = pre_line.0;
                 for (ln, line) in buffer {
                     self.result.push((ln, line));
                 }
@@ -566,19 +558,19 @@ impl<'a> Preprocessor<'a> {
         }
     }
 
-    fn process(mut self) -> Vec<(usize, String)> {
+    fn process(mut self) -> Vec<Line> {
         while !self.rest.is_empty() {
             let in_note = self.note_state.is_some();
 
             match Preprocessor::find_earliest_token_of_interest(self.rest, in_note) {
                 None => {
                     let remaining = self.rest.replace('\t', "    ");
-                    self.push_str(&remaining);
+                    self.append_and_advance(&remaining);
                     break;
                 }
                 Some((pos, token)) => {
                     let before = self.rest[..pos].replace('\t', "    ");
-                    self.push_str(&before);
+                    self.append_and_advance(&before);
                     self.rest = &self.rest[pos + token.len()..];
 
                     match token {
@@ -621,9 +613,9 @@ impl<'a> Preprocessor<'a> {
                             } else {
                                 s.last_char_is_newline = true;
                             }
-                            self.push_str("\n");
+                            self.append_and_advance("\n");
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("Already checks all possible tokens"),
                     }
                 }
             }
@@ -638,11 +630,12 @@ impl<'a> Preprocessor<'a> {
 
     fn find_earliest_token_of_interest(s: &str, in_note: bool) -> Option<(usize, &str)> {
         let next_boneyard = s.find("/*");
-        let next_note = if !in_note { s.find("[[") } else { None };
+        let next_note = if in_note { None } else { s.find("[[") };
         let next_note_end = if in_note { s.find("]]") } else { None };
         let next_note_break = if in_note { s.find('\n') } else { None };
 
         let mut candidates: Vec<(usize, &str)> = Vec::new();
+
         if let Some(p) = next_boneyard {
             candidates.push((p, "/*"));
         }
@@ -660,9 +653,11 @@ impl<'a> Preprocessor<'a> {
     }
 }
 
+type Line = (usize, String);
+
 struct NoteState {
-    buffer: Vec<(usize, String)>,
-    pre_line: (usize, String),
+    buffer: Vec<Line>,
+    pre_line: Line,
     last_char_is_newline: bool,
 }
 
@@ -786,7 +781,7 @@ mod tests {
             };
         }
 
-        fn test_parse<'a>(input: &str, expected: impl IntoIterator<Item = Element>) {
+        fn test_parse(input: &str, expected: impl IntoIterator<Item = Element>) {
             let parsed = parse(input);
             for (
                 Span {
