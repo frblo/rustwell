@@ -13,7 +13,7 @@ use typst::{
 use crate::{
     Exporter,
     rich_string::{self, RichString},
-    screenplay::{DialogueElement, Element, Screenplay},
+    screenplay::{DialogueElement, Element, Screenplay, Span},
 };
 
 /// The contents of the [typst] template `template.typ` found in the
@@ -76,7 +76,13 @@ impl TypstExporter {
         let formatted_elements = screenplay
             .elements
             .iter()
-            .map(|e| self.export_element(e))
+            .map(
+                |Span {
+                     start_line: _,
+                     end_line: _,
+                     inner: e,
+                 }| self.export_element(e),
+            )
             .collect::<Vec<String>>();
         let titlepage = self.export_titlepage(screenplay);
         format!("{TEMPLATE}\n{titlepage}\n{}", formatted_elements.join("\n"))

@@ -1882,6 +1882,7 @@ dependencies = [
  "bitflags 2.10.0",
  "typst",
  "typst-pdf",
+ "unicode-properties",
 ]
 
 [[package]]

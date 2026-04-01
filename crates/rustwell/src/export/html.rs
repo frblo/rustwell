@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{
     export::Exporter,
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element, Screenplay, TitlePage},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay, Span, TitlePage},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -22,6 +22,8 @@ pub struct HtmlExporter {
     pub standalone: bool,
     /// If synopses should be included in the output
     pub synopses: bool,
+    /// Decides if the `html` should include the line span for each element
+    pub include_source_positions: bool,
 }
 
 impl Exporter for HtmlExporter {
@@ -71,8 +73,7 @@ impl HtmlExporter {
             {}
             {}
             {}
-        </div>
-    "#,
+        </div>"#,
             self.export_titlepage_element("title", &titlepage.title),
             self.export_titlepage_element("credit", &titlepage.credit),
             self.export_titlepage_element("authors", &titlepage.authors),
@@ -101,11 +102,16 @@ impl HtmlExporter {
     }
 
     /// Formats an [Element] into a `html`-[String].
-    fn export_element(&self, element: &Element) -> String {
-        match element {
-            Element::Heading { slug, number } => {
+    fn export_element(&self, element: &Span<Element>) -> String {
+        if !self.synopses && matches!(element.inner, Element::Synopsis(_)) {
+            return String::new();
+        }
+
+        let (class, content) = match &element.inner {
+            Element::Heading { slug, number } => (
+                "scene-heading",
                 format!(
-                    r"<h6>{}{}{}</h6>",
+                    "{}{}{}",
                     if let Some(x) = number {
                         format!(r#"<span class="scnuml">{x}</span>"#)
                     } else {
@@ -117,19 +123,21 @@ impl HtmlExporter {
                     } else {
                         String::new()
                     },
-                )
-            }
-            Element::Action(s) => format!(
-                r#"<div class="action"><p>{}</p></div>"#,
-                self.format_rich_string(s)
+                ),
             ),
-            Element::Dialogue(dialogue) => format!(
-                r#"<div class="dialog"><p class="character">{}</p>{}</div>"#,
-                self.format_character(dialogue),
-                self.format_dialogue(&dialogue.elements),
+            Element::Action(s) => ("action", format!("<p>{}</p>", self.format_rich_string(s))),
+            Element::Dialogue(dialogue) => (
+                "dialogue",
+                format!(
+                    r#"<p class="character">{}</p>{}"#,
+                    self.format_character(dialogue),
+                    self.format_dialogue(&dialogue.elements),
+                ),
             ),
-            Element::DualDialogue(dialogue1, dialogue2) => format!(
-                r#"<div class="dual">
+            Element::DualDialogue(dialogue1, dialogue2) => (
+                "dual",
+                format!(
+                    r#"
                 <div class="left">
                     <p class="character">{}</p>
                     {}
@@ -137,39 +145,42 @@ impl HtmlExporter {
                 <div class="right">
                     <p class="character">{}</p>
                     {}
-                </div>
-            </div>"#,
-                self.format_character(dialogue1),
-                self.format_dialogue(&dialogue1.elements),
-                self.format_character(dialogue2),
-                self.format_dialogue(&dialogue2.elements),
+                </div>"#,
+                    self.format_character(dialogue1),
+                    self.format_dialogue(&dialogue1.elements),
+                    self.format_character(dialogue2),
+                    self.format_dialogue(&dialogue2.elements),
+                ),
             ),
-            Element::Lyrics(s) => format!(
-                r#"<div class="lyrics"><p>{}</p></div>"#,
-                self.format_rich_string(s)
+            Element::Lyrics(s) => (
+                "lyrics",
+                format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
             ),
-            Element::Transition(s) => {
+            Element::Transition(s) => ("transition", self.format_rich_string(s)),
+            Element::CenteredText(s) => (
+                "action centered",
+                format!(r"<p>{}</p>", self.format_rich_string(s)),
+            ),
+            Element::Synopsis(s) => (
+                "synopsis",
+                format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
+            ),
+            Element::PageBreak => ("", String::new()), // No pagebreaks in html
+        };
+
+        format!(
+            r#"<div class="{}" {}>{}</div>"#,
+            class,
+            if self.include_source_positions {
                 format!(
-                    r#"<div class="transition">{}</div>"#,
-                    self.format_rich_string(s)
+                    r#"data-start-line="{}" data-end-line="{}""#,
+                    element.start_line, element.end_line
                 )
-            }
-            Element::CenteredText(s) => format!(
-                r#"<div class="action centered"><p>{}</p></div>"#,
-                self.format_rich_string(s)
-            ),
-            Element::Synopsis(s) => {
-                if self.synopses {
-                    format!(
-                        r#"<div class="synopsis"><p>{}</p></div>"#,
-                        self.format_rich_string(s)
-                    )
-                } else {
-                    String::new()
-                }
-            }
-            Element::PageBreak => String::new(), // No pagebreaks in html
-        }
+            } else {
+                String::new()
+            },
+            content
+        )
     }
 
     fn format_character(&self, dialogue: &Dialogue) -> String {
