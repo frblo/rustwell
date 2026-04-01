@@ -80,7 +80,7 @@ impl<'a> Parser<'a> {
             match self.state {
                 State::Default => {
                     // The first one returning true will break
-                    if self.try_section(trimmed, i)
+                    if self.try_section(trimmed)
                         || self.try_page_break(trimmed, i)
                         || self.try_synopsis(trimmed, i)
                         || self.try_forced_action(trimmed, i)
@@ -136,7 +136,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn try_section(&mut self, line: &str, _line_idx: usize) -> bool {
+    fn try_section(&mut self, line: &str) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with('#').then_some(s),

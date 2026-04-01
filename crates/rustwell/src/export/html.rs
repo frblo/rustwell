@@ -22,7 +22,7 @@ pub struct HtmlExporter {
     pub standalone: bool,
     /// If synopses should be included in the output
     pub synopses: bool,
-    /// Decides if the html should include the line span for each element
+    /// Decides if the `html` should include the line span for each element
     pub include_source_positions: bool,
 }
 
@@ -177,7 +177,7 @@ impl HtmlExporter {
                     element.start_line, element.end_line
                 )
             } else {
-                "".to_string()
+                String::new()
             },
             content
         )

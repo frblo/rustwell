@@ -1,6 +1,10 @@
 //! This module implements a [`RichString`], meaning a *rich* string which can have multiple
 //! attributes for style, and can have these on different parts of the same string.
 //!
+//! Parsing is done in accordance with the
+//! [Fountain specification](https://fountain.io/syntax/) and emphasis in
+//! accordance to [CommonMark specification](https://spec.commonmark.org/0.31.2/).
+//!
 //! # Examples
 //!
 //! ```
@@ -30,8 +34,9 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// - `*italic*` → *italic*
 /// - `_underline_` → <u>underline</u>
 ///
-/// as specified in the [Fountain specification](https://fountain.io/syntax/). Furthermore,
-/// these can be combined in any overlapping order. Use `\` for a styling character to be
+/// as specified in the `Fountain` specification.
+/// Emphasis is parsed in accordance to the `CommonMark` specification.
+/// Furthermore, these can be combined in any overlapping order. Use `\` for a styling character to be
 /// ignored for style parsing.
 ///
 /// # Examples
@@ -39,8 +44,7 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// ```
 /// use rustwell::rich_string::RichString;
 ///
-/// let mut rs = RichString::new();
-/// rs.push_str("Hello **world!**");
+/// let mut rs = RichString::from("Hello **world!**");
 ///
 /// assert_eq!(rs.elements[0].text, "Hello ".to_string());
 /// assert_eq!(rs.elements[1].text, "world!".to_string());
@@ -130,7 +134,7 @@ impl RichString {
     /// Creates matches for a list of delimiters.
     ///
     /// Unlike `CommonMark`, won't create multiple nested matchings
-    /// in the naive case, that is when a delimiter run is greater than three.
+    /// in the naïve case, that is when a delimiter run is greater than three.
     /// Instead it will imitate the behavior by applying the appropriate
     /// resulting style.
     fn match_delimiters(delimiters: &mut [Delimiter]) -> Vec<Match> {
@@ -229,7 +233,8 @@ impl RichString {
 
             let a = attrs[i];
             if let Some(last) = self.elements.last_mut()
-                && last.attributes == a {
+                && last.attributes == a
+            {
                 last.text.push_str(&token);
                 continue;
             }
@@ -369,6 +374,8 @@ bitflags! {
     }
 }
 
+/// [`Delimiter`] represents a delimiter run in accordance to `CommonMark` spec.
+/// `token_idx` is the index in the token list which contains this delimiter run.
 #[derive(Debug, PartialEq, Eq)]
 struct Delimiter {
     char: char,
@@ -378,6 +385,7 @@ struct Delimiter {
     can_close: bool,
 }
 
+/// [`Match`] of two delimiter runs and which attribute their match results in.
 #[derive(Debug, PartialEq, Eq)]
 struct Match {
     opening_idx: usize,
