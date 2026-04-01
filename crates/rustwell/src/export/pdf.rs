@@ -171,6 +171,11 @@ const MARGINS: Margins = Margins {
     },
 };
 
+struct LayoutInfo<'a> {
+    pub size: &'a PaperSize,
+    pub fonts: &'a FontFamily,
+}
+
 /// A [`Screenplay`] exporter for `pdf`
 ///
 /// The variables configure the exporter
@@ -200,7 +205,12 @@ impl Exporter for PdfExporter {
             bold_italic: Font::new(FONTS[3].into(), 0).unwrap(),
         };
 
-        self.generate_pdf(&mut document, &self.paper_size, screenplay, &fonts)?;
+        let layout_info = LayoutInfo {
+            size: &self.paper_size,
+            fonts: &fonts,
+        };
+
+        self.generate_pdf(&mut document, &layout_info, screenplay)?;
 
         let pdf = document
             .finish()
@@ -221,9 +231,8 @@ impl PdfExporter {
     fn generate_pdf(
         &self,
         document: &mut Document,
-        size: &PaperSize,
+        layout_info: &LayoutInfo,
         screenplay: &Screenplay,
-        fonts: &FontFamily,
     ) -> std::io::Result<()> {
         // The index for which element in the screenplay is currently being processed.
         let mut screenplay_element_idx = 0;
@@ -233,7 +242,8 @@ impl PdfExporter {
 
         // The maximum number of writable lines which can fit on a page, considering the top and
         // bottom margins.
-        let max_lines_per_page = (size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
+        let max_lines_per_page =
+            (layout_info.size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
         // If an element does not fit within a page, this will be Some(index) pointing to the which
         // breakpoint in the breakpoint list to start at on the next page.
         let mut residual_breakpoint_idx = None;
@@ -246,13 +256,15 @@ impl PdfExporter {
 
         if let Some(t) = &screenplay.titlepage {
             page_idx += 1;
-            write_titlepage(size, t, max_lines_per_page, document, fonts)?;
+            write_titlepage(t, layout_info, max_lines_per_page, document)?;
         }
 
         // Page loop, creates a new page and writes everything it can on it.
         while screenplay_element_idx < screenplay.elements.len() {
-            let mut page = document
-                .start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
+            let mut page = document.start_page_with(
+                PageSettings::from_wh(layout_info.size.x as f32, layout_info.size.y as f32)
+                    .unwrap(),
+            );
             let mut surface = page.surface();
             let mut line_idx = 0;
 
@@ -261,7 +273,7 @@ impl PdfExporter {
                 || (screenplay.titlepage.is_some() && page_idx > 1)
             {
                 let residual_page_number = write_element_custom_top_margin(
-                    size,
+                    layout_info,
                     &format!(
                         "{}.",
                         if screenplay.titlepage.is_some() {
@@ -276,7 +288,6 @@ impl PdfExporter {
                     &mut 0,
                     1,
                     &mut surface,
-                    fonts,
                     Alignment::RightToLeft,
                     36,
                 )?;
@@ -322,14 +333,13 @@ impl PdfExporter {
                 macro_rules! write_element {
                     ($content:expr, $margin:expr, $text_direction:expr) => {
                         residual_breakpoint_idx = write_element(
-                            size,
+                            layout_info,
                             $content,
                             $margin,
                             &mut breakpoint_idx,
                             &mut line_idx,
                             max_lines_per_page,
                             &mut surface,
-                            fonts,
                             $text_direction,
                         )?
                     };
@@ -342,36 +352,34 @@ impl PdfExporter {
 
                             let left_number_margin = Margin {
                                 left: 54.0,
-                                right: size.x as f32 - MARGINS.heading.left + 18.0,
+                                right: layout_info.size.x as f32 - MARGINS.heading.left + 18.0,
                             };
                             let right_number_margin = Margin {
-                                left: size.x as f32 - MARGINS.heading.right + 18.0,
+                                left: layout_info.size.x as f32 - MARGINS.heading.right + 18.0,
                                 right: 18.0,
                             };
 
                             let rich_number = &number.as_ref().unwrap().into();
 
                             write_element(
-                                size,
+                                layout_info,
                                 rich_number,
                                 &left_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
                                 max_lines_per_page,
                                 &mut surface,
-                                fonts,
                                 Alignment::LeftToRight,
                             )?;
 
                             write_element(
-                                size,
+                                layout_info,
                                 rich_number,
                                 &right_number_margin,
                                 &mut 0,
                                 &mut initial_line_index.clone(),
                                 max_lines_per_page,
                                 &mut surface,
-                                fonts,
                                 Alignment::RightToLeft,
                             )?;
                         }
@@ -392,14 +400,13 @@ impl PdfExporter {
                     }
                     Element::Dialogue(dialogue) => {
                         let premature_exit = write_dialogue(
+                            layout_info,
                             dialogue,
                             &mut residual_dialogue_idx,
                             &mut residual_breakpoint_idx,
-                            size,
                             max_lines_per_page,
                             &mut line_idx,
                             &mut surface,
-                            fonts,
                             &MARGINS.dialogue,
                         )?;
                         if residual_dialogue_idx.is_some() || premature_exit {
@@ -417,14 +424,13 @@ impl PdfExporter {
                         {
                             premature_exit = premature_exit
                                 || write_dialogue(
+                                    layout_info,
                                     dialogue0,
                                     &mut residual_dual_dialogue_idx.0,
                                     &mut residual_dual_breakpoint_idx.0,
-                                    size,
                                     max_lines_per_page,
                                     &mut line_idx,
                                     &mut surface,
-                                    fonts,
                                     &MARGINS.dual_dialogue.left,
                                 )?;
                         }
@@ -434,14 +440,13 @@ impl PdfExporter {
                         {
                             premature_exit = premature_exit
                                 || write_dialogue(
+                                    layout_info,
                                     dialogue1,
                                     &mut residual_dual_dialogue_idx.1,
                                     &mut residual_dual_breakpoint_idx.1,
-                                    size,
                                     max_lines_per_page,
                                     &mut initial_line_index,
                                     &mut surface,
-                                    fonts,
                                     &MARGINS.dual_dialogue.right,
                                 )?;
                         }
@@ -502,14 +507,13 @@ impl PdfExporter {
 /// write the character name with the extension `(cont'd)` on each new page. Returns a
 /// [Option<bool>] which is true if the whole dialogue element did not fit on the same page.
 fn write_dialogue(
+    layout_info: &LayoutInfo,
     dialogue: &Dialogue,
     residual_dialogue: &mut Option<usize>,
     residual_index: &mut Option<usize>,
-    size: &PaperSize,
     max_lines: usize,
     line_index: &mut usize,
     surface: &mut Surface,
-    fonts: &FontFamily,
     dialogue_margins: &DialogueMargins,
 ) -> std::io::Result<bool> {
     let mut character_name = dialogue.character.clone();
@@ -525,7 +529,7 @@ fn write_dialogue(
         _ => (),
     };
     let span = glyph_span(
-        size,
+        layout_info.size,
         dialogue_margins.character.left,
         dialogue_margins.character.right,
     );
@@ -543,14 +547,13 @@ fn write_dialogue(
     }
 
     write_element(
-        size,
+        layout_info,
         &character_name,
         &dialogue_margins.character,
         &mut 0,
         line_index,
         max_lines,
         surface,
-        fonts,
         Alignment::LeftToRight,
     )?;
 
@@ -561,14 +564,13 @@ fn write_dialogue(
             // If a dialogue continues on the next page, writes `(MORE)` at the bottom of the
             // current page, inside the bottom margin.
             write_element(
-                size,
+                layout_info,
                 &"(MORE)".into(),
                 &dialogue_margins.character,
                 &mut 0,
                 line_index,
                 max_lines + 1,
                 surface,
-                fonts,
                 Alignment::LeftToRight,
             )?;
 
@@ -588,14 +590,13 @@ fn write_dialogue(
         };
 
         *residual_index = write_element(
-            size,
+            layout_info,
             content,
             margin,
             &mut breakpoint_index,
             line_index,
             max_lines,
             surface,
-            fonts,
             Alignment::LeftToRight,
         )?;
 
@@ -614,25 +615,23 @@ fn write_dialogue(
 /// will return [`Some`] with an index to which [`BreakPoint`] the function made it to. Calls
 /// [`write_element_custom_top_margin`] with the standard top margin.
 fn write_element(
-    size: &PaperSize,
+    layout_info: &LayoutInfo,
     content: &RichString,
     margin: &Margin,
     breakpoint_index: &mut usize,
     line_index: &mut usize,
     max_lines: usize,
     surface: &mut Surface,
-    fonts: &FontFamily,
     text_direction: Alignment,
 ) -> std::io::Result<Option<usize>> {
     write_element_custom_top_margin(
-        size,
+        layout_info,
         content,
         margin,
         breakpoint_index,
         line_index,
         max_lines,
         surface,
-        fonts,
         text_direction,
         TOP_MARGIN,
     )
@@ -642,20 +641,19 @@ fn write_element(
 /// will return [`Some`] with an index to which [`BreakPoint`] the function made it to. Allows for
 /// using a non-default top margin (for page numbers).
 fn write_element_custom_top_margin(
-    size: &PaperSize,
+    layout_info: &LayoutInfo,
     content: &RichString,
     margin: &Margin,
     breakpoint_index: &mut usize,
     line_index: &mut usize,
     max_lines: usize,
     surface: &mut Surface,
-    fonts: &FontFamily,
     text_direction: Alignment,
     top_margin: usize,
 ) -> std::io::Result<Option<usize>> {
     let left_margin = margin.left;
     let right_margin = margin.right;
-    let span = glyph_span(size, left_margin, right_margin);
+    let span = glyph_span(layout_info.size, left_margin, right_margin);
     let breakpoints = break_points(content, span);
     while *breakpoint_index <= breakpoints.len() {
         if *line_index >= max_lines {
@@ -668,15 +666,14 @@ fn write_element_custom_top_margin(
             breakpoints[*breakpoint_index - 1].index
         };
         write_line(
+            layout_info,
             surface,
             left_margin,
             (FONT_SIZE * *line_index + top_margin) as f32,
             content,
             start_index,
             breakpoints.get(*breakpoint_index),
-            fonts,
             text_direction,
-            size,
             margin,
         )?;
         *breakpoint_index += 1;
@@ -687,15 +684,14 @@ fn write_element_custom_top_margin(
 
 /// Writes a single line (not to be confused with [`DialogueElement::Line`]) onto the page.
 fn write_line(
+    layout_info: &LayoutInfo,
     surface: &mut Surface,
     mut x: f32,
     y: f32,
     content: &RichString,
     mut start_index: usize, // the "global" index to the rich string
     breakpoint: Option<&BreakPoint>,
-    fonts: &FontFamily,
     text_direction: Alignment,
-    size: &PaperSize,
     margin: &Margin,
 ) -> std::io::Result<()> {
     match content.get_char(start_index) {
@@ -726,12 +722,12 @@ fn write_line(
         Alignment::RightToLeft => {
             let line_length = breakpoint_index - start_index;
             let line_span = line_length as f32 * FONT_WIDTH;
-            x += size.x as f32 - (margin.left + margin.right) - line_span;
+            x += layout_info.size.x as f32 - (margin.left + margin.right) - line_span;
         }
         Alignment::Centered => {
             let line_length = breakpoint_index - start_index;
             let line_span = (line_length / 2) as f32 * FONT_WIDTH;
-            x = (size.x / 2) as f32 - line_span;
+            x = (layout_info.size.x / 2) as f32 - line_span;
         }
     }
 
@@ -759,10 +755,10 @@ fn write_line(
                 breakpoint_index - (start_index - relative_index)
             };
         let font = match (string_element.is_bold(), string_element.is_italic()) {
-            (false, false) => &fonts.regular,
-            (true, false) => &fonts.bold,
-            (false, true) => &fonts.italic,
-            (true, true) => &fonts.bold_italic,
+            (false, false) => &layout_info.fonts.regular,
+            (true, false) => &layout_info.fonts.bold,
+            (false, true) => &layout_info.fonts.italic,
+            (true, true) => &layout_info.fonts.bold_italic,
         };
         let mut char_indices = string_element.text.char_indices();
         let start_byte_index = char_indices.nth(relative_index).unwrap().0;
@@ -808,7 +804,7 @@ fn write_line(
     if break_word {
         surface.draw_text(
             Point::from_xy(x + (glyph_index as f32 * FONT_WIDTH), y),
-            fonts.regular.clone(),
+            layout_info.fonts.regular.clone(),
             FONT_SIZE as f32,
             "-",
             false,
@@ -860,14 +856,14 @@ const TITLE_PAGE_MARGINS: TitlePageMargins = TitlePageMargins {
 /// Writes the [`TitlePage`] to the `pdf` document. Fails if everything does not fit on one page,
 /// but allows for overlapping contact information and draft dates with the rest of the elements.
 fn write_titlepage(
-    size: &PaperSize,
     titlepage: &TitlePage,
+    layout_info: &LayoutInfo,
     max_lines: usize,
     document: &mut Document,
-    fonts: &FontFamily,
 ) -> std::io::Result<()> {
-    let mut page =
-        document.start_page_with(PageSettings::from_wh(size.x as f32, size.y as f32).unwrap());
+    let mut page = document.start_page_with(
+        PageSettings::from_wh(layout_info.size.x as f32, layout_info.size.y as f32).unwrap(),
+    );
     let mut surface = page.surface();
 
     let mut line_idx = max_lines / 3;
@@ -880,14 +876,13 @@ fn write_titlepage(
             if !titlepage.$element.is_empty() {
                 for s in &titlepage.$element {
                     let residual = write_element(
-                        size,
+                        layout_info,
                         s,
                         &TITLE_PAGE_MARGINS.$element,
                         &mut 0,
                         &mut line_idx,
                         max_lines,
                         &mut surface,
-                        fonts,
                         Alignment::Centered,
                     )?;
 
@@ -909,7 +904,7 @@ fn write_titlepage(
                     total_lines += break_points(
                         s,
                         glyph_span(
-                            size,
+                            layout_info.size,
                             TITLE_PAGE_MARGINS.$element.left,
                             TITLE_PAGE_MARGINS.$element.right,
                         ),
@@ -927,14 +922,13 @@ fn write_titlepage(
 
                 for s in &titlepage.$element {
                     write_element(
-                        size,
+                        layout_info,
                         s,
                         &TITLE_PAGE_MARGINS.$element,
                         &mut 0,
                         &mut line_idx,
                         max_lines,
                         &mut surface,
-                        fonts,
                         $alignment,
                     )?;
                 }
