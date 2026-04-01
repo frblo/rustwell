@@ -20,6 +20,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::{fmt::Display, str::Chars};
 
 use bitflags::bitflags;
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
@@ -64,6 +65,98 @@ impl RichString {
         }
     }
 
+    /// The total length of a [`RichString`], meaning the total number of [`char`]s.
+    pub fn char_count(&self) -> usize {
+        let mut len = 0;
+        for e in &self.elements {
+            len += e.text.chars().count();
+        }
+        len
+    }
+
+    /// Gets a [`char`] from a "global" index, meaning the index when viewing the [`RichString`] as
+    /// a single string without any style attributes taken into account.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rustwell::rich_string::RichString;
+    ///
+    /// let mut rs = RichString::from("He**llo**");
+    ///
+    /// assert_eq!(rs.get_char(1), Some('e'));
+    /// assert_eq!(rs.get_char(3), Some('l'));
+    /// assert_eq!(rs.get_char(5), None);
+    /// ```
+    pub fn get_char(&self, mut index: usize) -> Option<char> {
+        if index >= self.char_count() {
+            return None;
+        }
+        for e in &self.elements {
+            if index >= e.text.chars().count() {
+                index -= e.text.chars().count();
+                continue;
+            }
+            return e.text.chars().nth(index);
+        }
+        None
+    }
+
+    /// Given a "global" index, gets the [`Element`] which contains it, and the "local" index
+    /// pointing to that character in the element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rustwell::rich_string::RichString;
+    ///
+    /// let mut rs = RichString::from("He**ll**o");
+    ///
+    /// assert!(matches!(rs.get_element_from_index(1), Some((_, 1))));
+    /// assert!(matches!(rs.get_element_from_index(2), Some((_, 0))));
+    /// assert!(matches!(rs.get_element_from_index(3), Some((_, 1))));
+    /// assert!(matches!(rs.get_element_from_index(4), Some((_, 0))));
+    /// ```
+    pub fn get_element_from_index(&self, mut index: usize) -> Option<(&Element, usize)> {
+        if index >= self.char_count() {
+            return None;
+        }
+        for e in &self.elements {
+            if index >= e.text.chars().count() {
+                index -= e.text.chars().count();
+                continue;
+            }
+            return Some((e, index));
+        }
+        None
+    }
+
+    /// Creates an [`char`] iterator over the [`RichString`], without the style attributes of each
+    /// [`char`] taken into account.
+    pub fn iter(&'_ self) -> RichIterator<'_> {
+        RichIterator {
+            rich_string: self,
+            element_idx: 0,
+            chars_iterator: self.elements[0].text.chars(),
+        }
+    }
+
+    /// Appends a [`RichString`] to self. Will merge the last [`Element`] of self, and the
+    /// first of the other if they have the same style attributes.
+    pub fn append(&mut self, mut other: Self) {
+        if let Some(e) = other.elements.first()
+            && let Some(l) = self.elements.last_mut()
+        {
+            if e.attributes == l.attributes {
+                l.text.push_str(&e.text);
+                other.elements.drain(..1);
+                self.elements.append(&mut other.elements);
+                return;
+            }
+        }
+        self.elements.append(&mut other.elements);
+    }
+
     /// Pushes a string onto the [`RichString`]. Will divide the string into
     /// multiple elements with different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
@@ -71,6 +164,27 @@ impl RichString {
         let (tokens, mut delimiters) = Self::tokenize(str);
         let matches = Self::match_delimiters(&mut delimiters);
         self.push_parsed(&tokens, &delimiters, &matches);
+    }
+
+    /// Converts the [`RichString`] to a plain [`String`] by just combining the string elements
+    /// without adding delimiters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rustwell::rich_string::RichString;
+    ///
+    /// let mut rs = RichString::from("He**ll**o");
+    ///
+    /// assert_eq!(rs.to_plain_string(), "Hello".to_string());
+    /// ```
+    pub fn to_plain_string(&self) -> String {
+        let mut str = String::with_capacity(self.char_count());
+        for element in &self.elements {
+            str.push_str(&element.text);
+        }
+
+        str
     }
 
     /// Creates a list of "tokens" and [`Delimiter`] runs.
@@ -315,6 +429,34 @@ impl Default for RichString {
     }
 }
 
+impl Display for RichString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut str = String::with_capacity(self.char_count());
+
+        for element in &self.elements {
+            macro_rules! attr_to_delim {
+                ($attr:ident, $delimiter:expr) => {
+                    if element.$attr() { $delimiter } else { "" }
+                };
+            }
+
+            let element_text = format!(
+                "{}{}{}{}{}{}{}",
+                attr_to_delim!(is_bold, "**"),
+                attr_to_delim!(is_italic, "*"),
+                attr_to_delim!(is_underline, "_"),
+                element.text,
+                attr_to_delim!(is_underline, "_"),
+                attr_to_delim!(is_italic, "*"),
+                attr_to_delim!(is_bold, "**"),
+            );
+            str.extend(element_text.chars());
+        }
+
+        write!(f, "{str}")
+    }
+}
+
 impl<T> From<T> for RichString
 where
     T: AsRef<str>,
@@ -323,6 +465,31 @@ where
         let mut out = RichString::new();
         out.push_str(str);
         out
+    }
+}
+
+/// An intermediate iterator which allows for seamless iteration over the [Chars] inside a
+/// [`RichString`].
+pub struct RichIterator<'a> {
+    rich_string: &'a RichString,
+    element_idx: usize,
+    chars_iterator: Chars<'a>,
+}
+
+impl<'a> Iterator for RichIterator<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.chars_iterator.next();
+        if next.is_some() {
+            return next;
+        }
+        self.element_idx += 1;
+        if self.element_idx >= self.rich_string.elements.len() {
+            return None;
+        }
+        self.chars_iterator = self.rich_string.elements[self.element_idx].text.chars();
+        self.chars_iterator.next()
     }
 }
 
@@ -396,6 +563,20 @@ struct Match {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appends_same_attributes() {
+        let mut rs: RichString = "a*b*".into();
+        let other: RichString = "*c*d".into();
+        rs.append(other);
+        assert_eq!(rs.elements[1].text, "bc".to_string())
+    }
+
+    #[test]
+    fn displays_with_delims() {
+        let rs: RichString = "H**e**_ll_**_o_**".into();
+        assert_eq!(rs, rs.to_string().into())
+    }
 
     mod tokenize {
         use super::*;

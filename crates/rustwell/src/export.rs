@@ -10,7 +10,6 @@
 
 pub mod html;
 pub mod pdf;
-pub mod typst;
 
 use std::{
     fs::File,
