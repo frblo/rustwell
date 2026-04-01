@@ -65,7 +65,7 @@ impl RichString {
         }
     }
 
-    /// The total length of a [RichString], meaning the total number of [char]s.
+    /// The total length of a [`RichString`], meaning the total number of [`char`]s.
     pub fn char_count(&self) -> usize {
         let mut len = 0;
         for e in &self.elements {
