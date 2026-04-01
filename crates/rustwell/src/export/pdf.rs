@@ -234,8 +234,7 @@ impl PdfExporter {
         layout_info: &LayoutInfo,
         screenplay: &Screenplay,
     ) -> std::io::Result<()> {
-        // The index for which element in the screenplay is currently being processed.
-        let mut screenplay_element_idx = 0;
+        let mut element_iter = screenplay.elements.iter().peekable();
 
         // The index for which page in the document is currently being written.
         let mut page_idx = 0;
@@ -244,8 +243,8 @@ impl PdfExporter {
         // bottom margins.
         let max_lines_per_page =
             (layout_info.size.y - (TOP_MARGIN + BOTTOM_MARGIN)) / FONT_SIZE - 1;
-        // If an element does not fit within a page, this will be Some(index) pointing to the which
-        // breakpoint in the breakpoint list to start at on the next page.
+        // If an element does not fit within a page this will be Some(index), where index is pointing
+        // to the breakpoint in the breakpoint list which should be on the start of the next page.
         let mut residual_breakpoint_idx = None;
         let mut residual_dialogue_idx = None;
 
@@ -260,7 +259,7 @@ impl PdfExporter {
         }
 
         // Page loop, creates a new page and writes everything it can on it.
-        while screenplay_element_idx < screenplay.elements.len() {
+        while element_iter.peek().is_some() {
             let mut page = document.start_page_with(
                 PageSettings::from_wh(layout_info.size.x as f32, layout_info.size.y as f32)
                     .unwrap(),
@@ -302,20 +301,16 @@ impl PdfExporter {
             }
 
             // Element loop, iterates through the screenplay elements.
-            loop {
+            while let Some(Span {
+                start_line: _,
+                end_line: _,
+                inner: element,
+            }) = element_iter.peek()
+            {
                 if line_idx >= max_lines_per_page {
                     break;
                 }
 
-                if screenplay_element_idx >= screenplay.elements.len() {
-                    break;
-                }
-
-                let Span {
-                    start_line: _,
-                    end_line: _,
-                    inner: element,
-                } = &screenplay.elements[screenplay_element_idx];
                 let mut breakpoint_idx = match residual_breakpoint_idx {
                     Some(i) => {
                         // If we're in a dialogue element, we need to preserve
@@ -479,18 +474,19 @@ impl PdfExporter {
                         }
                     }
                     Element::PageBreak => {
-                        screenplay_element_idx += 1;
+                        element_iter.next();
                         break;
                     }
                 }
 
+                // Newline separator between all elements
                 line_idx += 1;
 
                 if residual_breakpoint_idx.is_some() {
                     continue;
                 }
 
-                screenplay_element_idx += 1;
+                element_iter.next();
             }
 
             surface.finish();
@@ -712,7 +708,7 @@ fn write_line(
 
     let (breakpoint_index, break_word) = match breakpoint {
         Some(b) => (b.index, b.break_type == BreakType::BreakWord),
-        None => (content.len(), false),
+        None => (content.char_count(), false),
     };
 
     // If we use a nonstandard [`Alignment`] we must move the `x` value of which we start writing
@@ -980,7 +976,7 @@ struct BreakPoint {
 fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
     debug_assert!(span >= 2);
 
-    let mut brekpoints = Vec::with_capacity(content.len() / span + 1);
+    let mut brekpoints = Vec::with_capacity(content.char_count() / span + 1);
     let mut last_whitespace_char = (0, 0);
     let mut line_len = 0;
     for (i, glyph) in content.iter().enumerate() {

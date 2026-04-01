@@ -19,8 +19,8 @@
 //! assert!(rs.elements[2].is_bold());
 //! ```
 
-use std::{fmt::Display, str::Chars};
 use std::collections::HashMap;
+use std::{fmt::Display, str::Chars};
 
 use bitflags::bitflags;
 use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
@@ -66,7 +66,7 @@ impl RichString {
     }
 
     /// The total length of a [RichString], meaning the total number of [char]s.
-    pub fn len(&self) -> usize {
+    pub fn char_count(&self) -> usize {
         let mut len = 0;
         for e in &self.elements {
             len += e.text.chars().count();
@@ -76,8 +76,20 @@ impl RichString {
 
     /// Gets a [`char`] from a "global" index, meaning the index when viewing the [`RichString`] as
     /// a single string without any style attributes taken into account.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rustwell::rich_string::RichString;
+    ///
+    /// let mut rs = RichString::from("He**llo**");
+    ///
+    /// assert_eq!(rs.get_char(1), Some('e'));
+    /// assert_eq!(rs.get_char(3), Some('l'));
+    /// assert_eq!(rs.get_char(5), None);
+    /// ```
     pub fn get_char(&self, mut index: usize) -> Option<char> {
-        if index >= self.len() {
+        if index >= self.char_count() {
             return None;
         }
         for e in &self.elements {
@@ -93,7 +105,7 @@ impl RichString {
     /// Given a "global" index, gets the [`Element`] which contains it, and the "local" index
     /// pointing to that character in the element.
     pub fn get_element_from_index(&self, mut index: usize) -> Option<(&Element, usize)> {
-        if index >= self.len() {
+        if index >= self.char_count() {
             return None;
         }
         for e in &self.elements {
@@ -375,7 +387,7 @@ impl Default for RichString {
 
 impl Display for RichString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut str = String::with_capacity(self.len());
+        let mut str = String::with_capacity(self.char_count());
         for element in &self.elements {
             str.push_str(&element.text);
         }
