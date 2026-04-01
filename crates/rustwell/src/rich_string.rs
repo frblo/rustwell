@@ -131,8 +131,8 @@ impl RichString {
         None
     }
 
-    /// Creates an [char] iterator over the [`RichString`], without the style attributes of each
-    /// [char] taken into account.
+    /// Creates an [`char`] iterator over the [`RichString`], without the style attributes of each
+    /// [`char`] taken into account.
     pub fn iter(&'_ self) -> RichIterator<'_> {
         RichIterator {
             rich_string: self,
