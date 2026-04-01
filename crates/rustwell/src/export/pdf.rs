@@ -16,7 +16,7 @@ use krilla::{
 use crate::{
     Exporter, Screenplay,
     rich_string::RichString,
-    screenplay::{Dialogue, DialogueElement, Element, TitlePage},
+    screenplay::{Dialogue, DialogueElement, Element, Span, TitlePage},
 };
 
 const FONT_SIZE: usize = 12; // standard screenplay size
@@ -300,7 +300,11 @@ impl PdfExporter {
                     break;
                 }
 
-                let element = &screenplay.elements[screenplay_element_idx];
+                let Span {
+                    start_line: _,
+                    end_line: _,
+                    inner: element,
+                } = &screenplay.elements[screenplay_element_idx];
                 let mut breakpoint_idx = match residual_breakpoint_idx {
                     Some(i) => {
                         // If we're in a dialogue element, we need to preserve
