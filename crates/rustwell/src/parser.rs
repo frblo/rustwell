@@ -1,11 +1,12 @@
+use std::iter::Peekable;
+
 use crate::rich_string::RichString;
 use crate::screenplay::Dialogue;
 use crate::screenplay::DialogueElement;
 use crate::screenplay::Element;
 use crate::screenplay::Screenplay;
+use crate::screenplay::Span;
 use crate::screenplay::TitlePage;
-use std::iter::Peekable;
-use std::str::Lines;
 
 /// Parses a Fountain source string into a [`Screenplay`] structure.
 ///
@@ -29,8 +30,8 @@ use std::str::Lines;
 /// ```
 #[must_use]
 pub fn parse(src: &str) -> Screenplay {
-    let cleaned = preprocess_source(src);
-    Parser::new(&cleaned).parse()
+    let preprocessor = Preprocessor::new(src);
+    Parser::new(&preprocessor.process()).parse()
 }
 
 /// Internal parser state machine for Fountain.
@@ -38,9 +39,9 @@ pub fn parse(src: &str) -> Screenplay {
 /// Keeps an iterator of the source, a accumulative list of [`Element`]s, and
 /// a state. Also tracks a [`TitlePage`] if such exists in the source.
 struct Parser<'a> {
-    lines: Peekable<Lines<'a>>,
+    lines: Peekable<std::slice::Iter<'a, Line>>,
     state: State,
-    elements: Vec<Element>,
+    elements: Vec<Span<Element>>,
     title_page: Option<TitlePage>,
 }
 
@@ -48,9 +49,9 @@ impl<'a> Parser<'a> {
     /// Create new parser
     ///
     /// Expects `src` to have been preprocessed.
-    fn new(src: &'a str) -> Self {
+    fn new(src: &'a [Line]) -> Self {
         Self {
-            lines: src.lines().peekable(),
+            lines: src.iter().peekable(),
             state: State::Default,
             elements: Vec::new(),
             title_page: None,
@@ -67,7 +68,8 @@ impl<'a> Parser<'a> {
     /// calling trim on a already trimmed [&str].
     fn parse(mut self) -> Screenplay {
         self.parse_title();
-        while let Some(line) = self.lines.next() {
+        while let Some((i, line)) = self.lines.next() {
+            let i = *i;
             let trimmed = line.trim();
 
             if trimmed.is_empty() && !line.starts_with("  ") {
@@ -79,21 +81,22 @@ impl<'a> Parser<'a> {
                 State::Default => {
                     // The first one returning true will break
                     if self.try_section(trimmed)
-                        || self.try_page_break(trimmed)
-                        || self.try_synopsis(trimmed)
-                        || self.try_forced_action(trimmed)
-                        || self.try_centered(trimmed)
-                        || self.try_lyrics(trimmed)
-                        || self.try_heading(trimmed)
-                        || self.try_transition(trimmed)
-                        || self.try_dialogue_start(trimmed)
-                        || self.try_action(line)
+                        || self.try_page_break(trimmed, i)
+                        || self.try_synopsis(trimmed, i)
+                        || self.try_forced_action(trimmed, i)
+                        || self.try_centered(trimmed, i)
+                        || self.try_lyrics(trimmed, i)
+                        || self.try_heading(trimmed, i)
+                        || self.try_transition(trimmed, i)
+                        || self.try_dialogue_start(trimmed, i)
+                        || self.try_action(line, i)
                     {}
                 }
                 State::InDialogue => {
-                    let curr_dialogue = self
+                    let (curr_dialogue, end_line) = self
                         .get_last_dialogue()
                         .expect("Must exist since we are in dialogue block");
+                    *end_line = i;
 
                     if trimmed.starts_with('(') {
                         curr_dialogue
@@ -107,9 +110,9 @@ impl<'a> Parser<'a> {
                         .push(DialogueElement::Line(RichString::from(trimmed)));
                 }
                 State::InBlock => {
-                    if self.try_centered(trimmed)
-                        || self.try_lyrics(trimmed)
-                        || self.try_action(line)
+                    if self.try_centered(trimmed, i)
+                        || self.try_lyrics(trimmed, i)
+                        || self.try_action(line, i)
                     {}
                 }
             }
@@ -141,119 +144,136 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn try_synopsis(&mut self, line: &str) -> bool {
+    fn try_synopsis(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('='),
             |this, inner| {
                 if this.state == State::InBlock
-                    && let Some(Element::Synopsis(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::Synopsis(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::Synopsis(rs));
+                this.elements
+                    .push(Span::new(Element::Synopsis(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_page_break(&mut self, line: &str) -> bool {
+    fn try_page_break(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with("===").then_some(s),
-            |this, _| this.elements.push(Element::PageBreak),
+            |this, _| this.elements.push(Span::new(Element::PageBreak, line_idx)),
         )
     }
 
-    fn try_forced_action(&mut self, line: &str) -> bool {
+    fn try_forced_action(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('!'),
             |this, inner| {
-                this.elements.push(Element::Action(RichString::from(inner)));
+                this.elements.push(Span::new(
+                    Element::Action(RichString::from(inner)),
+                    line_idx,
+                ));
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_centered(&mut self, line: &str) -> bool {
+    fn try_centered(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim().strip_prefix('>').and_then(|u| u.strip_suffix('<')),
             |this, inner| {
                 let inner = inner.trim();
                 if this.state == State::InBlock
-                    && let Some(Element::CenteredText(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::CenteredText(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::CenteredText(rs));
+                this.elements
+                    .push(Span::new(Element::CenteredText(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_lyrics(&mut self, line: &str) -> bool {
+    fn try_lyrics(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('~'),
             |this, inner| {
                 if this.state == State::InBlock
-                    && let Some(Element::Lyrics(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::Lyrics(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::Lyrics(rs));
+                this.elements.push(Span::new(Element::Lyrics(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_action(&mut self, line: &str) -> bool {
+    fn try_action(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |_, line| Some(line),
             |this, inner| {
                 if this.state == State::InBlock
-                    && let Some(Element::Action(rs)) = this.elements.last_mut()
+                    && let Some(Span {
+                        start_line: _,
+                        end_line,
+                        inner: Element::Action(rs),
+                    }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
+                    *end_line = line_idx;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Element::Action(rs));
+                this.elements.push(Span::new(Element::Action(rs), line_idx));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    #[inline]
-    fn starts_with_ascii_ci(s: &str, pat: &str) -> bool {
-        let n = pat.len();
-        s.as_bytes()
-            .get(..n)
-            .is_some_and(|head| head.eq_ignore_ascii_case(pat.as_bytes()))
-    }
-
-    fn try_heading(&mut self, line: &str) -> bool {
+    fn try_heading(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -270,13 +290,16 @@ impl<'a> Parser<'a> {
                     );
                 }
 
-                // INT./EXT, INT/EXT covered by INT
-                let pats = ["INT", "EXT", "EST", "I/E"];
+                let pats = ["INT", "EXT", "EST", "I/E", "INT./EXT", "INT/EXT"];
+                let bytes = trimmed.as_bytes();
 
-                (pats
-                    .iter()
-                    .any(|p| Parser::starts_with_ascii_ci(trimmed, p))
-                    && this.next_line_is_empty())
+                (pats.iter().any(|p| {
+                    let n = p.len();
+                    bytes
+                        .get(..n)
+                        .is_some_and(|head| head.eq_ignore_ascii_case(p.as_bytes()))
+                        && bytes.get(n).is_some_and(|&end| end == b' ' || end == b'.')
+                }) && this.next_line_is_empty())
                 .then_some(trimmed)
             },
             |this, inner| {
@@ -292,42 +315,60 @@ impl<'a> Parser<'a> {
                     inner = new_inner.trim_end();
                 }
 
-                this.elements.push(Element::Heading {
-                    slug: RichString::from(inner),
-                    number,
-                });
+                this.elements.push(Span::new(
+                    Element::Heading {
+                        slug: RichString::from(inner),
+                        number,
+                    },
+                    line_idx,
+                ));
 
                 this.lines.next();
             },
         )
     }
 
-    fn get_last_dialogue(&mut self) -> Option<&mut Dialogue> {
-        let Some(Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue)) =
-            self.elements.last_mut()
+    fn get_last_dialogue(&mut self) -> Option<(&mut Dialogue, &mut usize)> {
+        let Some(Span {
+            start_line: _,
+            end_line,
+            inner: Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue),
+        }) = self.elements.last_mut()
         else {
             return None;
         };
 
-        Some(curr_dialogue)
+        Some((curr_dialogue, end_line))
     }
 
-    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str) -> &'s str {
+    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str, line_idx: usize) -> &'s str {
         let new_dialogue = Dialogue::new();
 
         if let Some(stripped) = inner.trim_end().strip_suffix('^')
-            && let Some(&Element::Dialogue(_)) = self.elements.last()
-            && let Some(Element::Dialogue(d)) = self.elements.pop()
+            && let Some(&Span {
+                start_line: _,
+                end_line: _,
+                inner: Element::Dialogue(_),
+            }) = self.elements.last()
+            && let Some(Span {
+                start_line,
+                end_line: _,
+                inner: Element::Dialogue(d),
+            }) = self.elements.pop()
         {
-            self.elements.push(Element::DualDialogue(d, new_dialogue));
+            self.elements.push(Span::new(
+                Element::DualDialogue(d, new_dialogue),
+                start_line,
+            ));
             return stripped;
         }
 
-        self.elements.push(Element::Dialogue(new_dialogue));
+        self.elements
+            .push(Span::new(Element::Dialogue(new_dialogue), line_idx));
         inner
     }
 
-    fn try_dialogue_start(&mut self, line: &str) -> bool {
+    fn try_dialogue_start(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -342,9 +383,9 @@ impl<'a> Parser<'a> {
                 (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
             },
             |this, inner| {
-                let mut inner = this.insert_empty_dialogue(inner);
+                let mut inner = this.insert_empty_dialogue(inner, line_idx);
 
-                let curr_dialogue = this
+                let (curr_dialogue, end_line) = this
                     .get_last_dialogue()
                     .expect("Just pushed to list, must exist");
 
@@ -356,13 +397,14 @@ impl<'a> Parser<'a> {
                 }
 
                 curr_dialogue.character = RichString::from(inner);
+                *end_line = line_idx;
 
                 this.state = State::InDialogue;
             },
         )
     }
 
-    fn try_transition(&mut self, line: &str) -> bool {
+    fn try_transition(&mut self, line: &str, line_idx: usize) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -379,8 +421,10 @@ impl<'a> Parser<'a> {
                 (transition_elem && this.next_line_is_empty()).then_some(line)
             },
             |this, inner| {
-                this.elements
-                    .push(Element::Transition(RichString::from(inner)));
+                this.elements.push(Span::new(
+                    Element::Transition(RichString::from(inner)),
+                    line_idx,
+                ));
 
                 this.lines.next();
             },
@@ -390,7 +434,7 @@ impl<'a> Parser<'a> {
     fn parse_title(&mut self) {
         let mut tp = TitlePage::new();
 
-        while let Some(line) = self.lines.peek() {
+        while let Some((_, line)) = self.lines.peek() {
             let Some((key, val)) = line.split_once(':') else {
                 break;
             };
@@ -432,7 +476,7 @@ impl<'a> Parser<'a> {
 
     fn take_indented_block(&mut self) -> Vec<RichString> {
         let mut out = Vec::new();
-        while let Some(next) = self.lines.peek().copied() {
+        while let Some((_, next)) = self.lines.peek().copied() {
             if next.starts_with("   ") {
                 self.lines.next();
                 out.push(RichString::from(next.trim()));
@@ -444,123 +488,8 @@ impl<'a> Parser<'a> {
     }
 
     fn next_line_is_empty(&mut self) -> bool {
-        self.lines.peek().is_none_or(|s| s.trim().is_empty())
+        self.lines.peek().is_none_or(|(_, s)| s.trim().is_empty())
     }
-}
-
-/// Removes boneyards, notes and normalizes tabs to four spaces
-fn preprocess_source(src: &str) -> String {
-    let bytes = src.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    let mut in_boneyard = false;
-
-    // Filter out boneyard and replace tabs
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if in_boneyard {
-            // Inside boneyard: preserve only newlines so that a boneyard can cover all whitespace
-            if b == b'\n' {
-                out.push(b'\n');
-                i += 1;
-                continue;
-            }
-
-            // Check if at the end of boneyard
-            if i + 1 < bytes.len() && b == b'*' && bytes[i + 1] == b'/' {
-                in_boneyard = false;
-                i += 2;
-                continue;
-            }
-
-            i += 1;
-        } else {
-            // Check if at the start of a boneyard
-            if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
-                in_boneyard = true;
-                i += 2;
-                continue;
-            }
-
-            // A Fountain-specified tab: 4 spaces
-            if b == b'\t' {
-                out.extend_from_slice(b"    ");
-                i += 1;
-                continue;
-            }
-
-            // Normal character
-            out.push(b);
-            i += 1;
-        }
-    }
-
-    // Filter out notes
-    let mut final_out = Vec::with_capacity(out.len());
-    i = 0;
-    let mut in_note = false;
-    let mut note_buffer = Vec::new();
-
-    while i < out.len() {
-        let b = out[i];
-
-        if in_note {
-            // Inside note: preserve only newlines so that a note can cover all whitespace
-            if b == b'\n' {
-                // Allowed newline in note: "[[\n  \n]]"
-                if i + 3 < out.len()
-                    && out[i + 1] == b' '
-                    && out[i + 2] == b' '
-                    && out[i + 3] == b'\n'
-                {
-                    note_buffer.push(b'\n');
-                    note_buffer.push(b' ');
-                    note_buffer.push(b' ');
-                    note_buffer.push(b'\n');
-                    i += 4;
-                    continue;
-                }
-                // Exit note without closing it
-                if i + 1 < out.len() && out[i + 1] == b'\n' {
-                    final_out.append(&mut note_buffer);
-                    final_out.push(b'\n');
-                    final_out.push(b'\n');
-                    i += 2;
-                    continue;
-                }
-                note_buffer.push(b'\n');
-                i += 1;
-                continue;
-            }
-
-            // Check if at the end of note
-            if i + 1 < out.len() && b == b']' && out[i + 1] == b']' {
-                in_note = false;
-                note_buffer = Vec::new();
-                i += 2;
-                continue;
-            }
-
-            note_buffer.push(b);
-            i += 1;
-        } else {
-            // Check if at the start of a note
-            if i + 1 < out.len() && b == b'[' && out[i + 1] == b'[' {
-                in_note = true;
-                note_buffer = vec![b'[', b'['];
-                i += 2;
-                continue;
-            }
-
-            // Normal character
-            final_out.push(b);
-            i += 1;
-        }
-    }
-    final_out.append(&mut note_buffer);
-
-    String::from_utf8(final_out).expect("Valid UTF-8 after preprocessing")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -571,104 +500,379 @@ enum State {
     InBlock,
 }
 
+/// Removes boneyards, notes and normalizes tabs to four spaces
+struct Preprocessor<'a> {
+    result: Vec<Line>,
+    current_line: Line,
+    source_line: usize,
+    note_state: Option<NoteState>,
+    rest: &'a str,
+}
+
+impl<'a> Preprocessor<'a> {
+    fn new(src: &'a str) -> Self {
+        Preprocessor {
+            result: Vec::new(),
+            current_line: (1, String::new()),
+            source_line: 1,
+            note_state: None,
+            rest: src,
+        }
+    }
+
+    /// Appends the given [`&str`] to the `current_line`.
+    /// When encountering newlines it appends the `current_line` to `result`
+    /// and advances `source_line`.
+    fn append_and_advance(&mut self, s: &str) {
+        let mut lines = s.split('\n');
+        if let Some(first) = lines.next() {
+            self.current_line.1.push_str(first);
+        }
+
+        for segment in lines {
+            if let Some(NoteState { buffer, .. }) = &mut self.note_state {
+                buffer.push(std::mem::take(&mut self.current_line));
+            } else {
+                self.result.push(std::mem::take(&mut self.current_line));
+            }
+            self.source_line += 1;
+            self.current_line.0 = self.source_line;
+            self.current_line.1.push_str(segment);
+        }
+    }
+
+    /// Dump the note buffer into the result and leaving `current_line` as
+    /// the current line being processed.
+    fn dump_note_buffer(&mut self) {
+        if let Some(NoteState {
+            mut buffer,
+            pre_line,
+            ..
+        }) = self.note_state.take()
+        {
+            if buffer.is_empty() {
+                let note_tail = std::mem::take(&mut self.current_line.1);
+                self.current_line = (pre_line.0, pre_line.1 + &note_tail);
+            } else {
+                buffer[0].1 = pre_line.1 + &buffer[0].1;
+                buffer[0].0 = pre_line.0;
+                for (ln, line) in buffer {
+                    self.result.push((ln, line));
+                }
+            }
+        }
+    }
+
+    /// The main function for the preprocessor.
+    fn process(mut self) -> Vec<Line> {
+        while !self.rest.is_empty() {
+            let in_note = self.note_state.is_some();
+
+            match Preprocessor::find_earliest_token_of_interest(self.rest, in_note) {
+                None => {
+                    let remaining = self.rest.replace('\t', "    ");
+                    self.append_and_advance(&remaining);
+                    break;
+                }
+                Some((pos, token)) => {
+                    let before = self.rest[..pos].replace('\t', "    ");
+                    self.append_and_advance(&before);
+                    self.rest = &self.rest[pos + token.len()..];
+
+                    match token {
+                        "/*" => {
+                            let (boneyard, after) = match self.rest.find("*/") {
+                                Some(end) => (&self.rest[..end], &self.rest[end + 2..]),
+                                None => (self.rest, ""),
+                            };
+                            let newline_count = boneyard.chars().filter(|&c| c == '\n').count();
+                            self.source_line += newline_count;
+
+                            self.rest = after;
+                        }
+                        "[[" => {
+                            self.note_state = Some(NoteState {
+                                buffer: vec![],
+                                pre_line: std::mem::take(&mut self.current_line),
+                                last_char_is_newline: false,
+                            });
+                            self.current_line = (self.source_line, "[[".to_string());
+                        }
+                        "]]" => {
+                            self.current_line = self
+                                .note_state
+                                .take()
+                                .map_or((self.source_line, String::new()), |n| n.pre_line);
+                        }
+                        "\n" => {
+                            let Some(s) = &mut self.note_state else {
+                                unreachable!(
+                                    "We only look for this pattern when note state is some."
+                                );
+                            };
+
+                            if s.last_char_is_newline
+                                && (pos == 0
+                                    || pos == 1 && matches!(before.chars().next(), Some(' ')))
+                            {
+                                self.dump_note_buffer();
+                            } else {
+                                s.last_char_is_newline = true;
+                            }
+                            self.append_and_advance("\n");
+                        }
+                        _ => unreachable!("Already checks all possible tokens"),
+                    }
+                }
+            }
+        }
+
+        self.dump_note_buffer();
+        if !self.current_line.1.is_empty() {
+            self.result.push(self.current_line);
+        }
+        self.result
+    }
+
+    /// Searches for the next potential token of interest.
+    /// Always looks for boneyards and other depends on if `in_note` or not.
+    fn find_earliest_token_of_interest(s: &str, in_note: bool) -> Option<(usize, &str)> {
+        let next_boneyard = s.find("/*");
+        let next_note = if in_note { None } else { s.find("[[") };
+        let next_note_end = if in_note { s.find("]]") } else { None };
+        let next_note_break = if in_note { s.find('\n') } else { None };
+
+        let mut candidates: Vec<(usize, &str)> = Vec::new();
+
+        if let Some(p) = next_boneyard {
+            candidates.push((p, "/*"));
+        }
+        if let Some(p) = next_note {
+            candidates.push((p, "[["));
+        }
+        if let Some(p) = next_note_end {
+            candidates.push((p, "]]"));
+        }
+        if let Some(p) = next_note_break {
+            candidates.push((p, "\n"));
+        }
+
+        candidates.into_iter().min_by_key(|&(p, _)| p)
+    }
+}
+
+/// Type alias making it more clear what the tuple represents.
+type Line = (usize, String);
+
+/// Keeps the state needed for when we are in a note during preprocessing.
+struct NoteState {
+    buffer: Vec<Line>,
+    pre_line: Line,
+    last_char_is_newline: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn parser_tester(input: &str, correct: Screenplay) {
-        let parsed = parse(input);
-        assert_eq!(parsed, correct)
-    }
+    mod preprocessor {
+        use super::*;
 
-    #[test]
-    fn parses_heading_without_number() {
-        let input = "InT. OUTSIDE - DAY";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
-                slug: input.into(),
-                number: None,
-            }],
+        macro_rules! test_preprocessor {
+            ($name:ident, $src:expr, [$(($line:expr, $expected:expr)),*]) => {
+                #[test]
+                fn $name() {
+                assert_eq!(
+                Preprocessor::new($src).process(),
+                vec![$(($line, $expected.to_string())),*]
+                );
+                }
+            };
+        }
+
+        test_preprocessor!(trivial, "Hello\nWorld", [(1, "Hello"), (2, "World")]);
+
+        test_preprocessor!(
+            boneyard_mid_line,
+            "Hello /* removed */ World",
+            [(1, "Hello  World")]
         );
 
-        parser_tester(input, correct)
+        test_preprocessor!(
+            boneyard_line_start,
+            "Hello\n/* removed */\nWorld",
+            [(1, "Hello"), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            boneyard_multiline_line_start,
+            "Hello\n/* multi\nline\nboneyard */\nWorld",
+            [(1, "Hello"), (2, ""), (5, "World")]
+        );
+
+        test_preprocessor!(
+            boneyard_multiline_mid_line,
+            "Hello /* multi\nline */ World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            note_removed,
+            "Hello [[a note]] World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            note_multiline_removed,
+            "Hello [[a\nnote]] World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            note_break_double_newline,
+            "Hello [[a note\n\nWorld",
+            [(1, "Hello [[a note"), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            note_break_single_space_newline,
+            "Hello [[a note\n \nWorld",
+            [(1, "Hello [[a note"), (2, " "), (3, "World")]
+        );
+
+        test_preprocessor!(
+            not_note_break_single_letter_newline,
+            "Hello [[a note,\na\nWorld",
+            [(1, "Hello [[a note,"), (2, "a"), (3, "World")]
+        );
+
+        test_preprocessor!(note_unclosed, "Hello [[a note", [(1, "Hello [[a note")]);
+
+        test_preprocessor!(
+            note_with_boneyard_inside,
+            "Hello [[a /* b1 */ note /* b2 */ here]] World",
+            [(1, "Hello  World")]
+        );
+
+        test_preprocessor!(
+            boneyard_inside_note_breaks_note,
+            "Hello [[a note\n/* boneyard */\nWorld",
+            [(1, "Hello [[a note"), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            mixed_boneyard_and_note,
+            "/* boneyard */\n[[a note]]\nWorld",
+            [(1, ""), (2, ""), (3, "World")]
+        );
+
+        test_preprocessor!(
+            source_lines_preserved_after_boneyard,
+            "Line1\n/*\n\n\n*/\nLine2",
+            [(1, "Line1"), (2, ""), (6, "Line2")]
+        );
+
+        test_preprocessor!(
+            source_lines_preserved_after_note,
+            "Line1\n[[a\nmultiline\nnote]]\nLine2",
+            [(1, "Line1"), (2, ""), (5, "Line2")]
+        );
     }
 
-    #[test]
-    fn parses_heading_with_number() {
-        let input = "INT. OUTSIDE - DAY #S.1#";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
+    mod end_to_end_parse {
+        use super::*;
+
+        macro_rules! test_screenplay {
+            ($name:ident, $input:expr, [$($elem:expr),*]) => {
+                #[test]
+                fn $name() {
+                test_parse($input, [$($elem),*]);
+                }
+            };
+        }
+
+        fn test_parse(input: &str, expected: impl IntoIterator<Item = Element>) {
+            let parsed = parse(input);
+            for (
+                Span {
+                    start_line: _,
+                    end_line: _,
+                    inner: actual,
+                },
+                expected,
+            ) in parsed.elements.iter().zip(expected)
+            {
+                assert_eq!(actual, &expected);
+            }
+        }
+
+        test_screenplay!(
+            parses_heading_without_number,
+            "InT. OUTSIDE - DAY",
+            [Element::Heading {
+                slug: "InT. OUTSIDE - DAY".into(),
+                number: None,
+            }]
+        );
+
+        test_screenplay!(
+            does_not_parse_heading_whitout_dot,
+            "Intro music plays.",
+            [Element::Action("Intro music plays.".into())]
+        );
+
+        test_screenplay!(
+            parses_heading_with_number,
+            "INT. OUTSIDE - DAY #S.1#",
+            [Element::Heading {
                 slug: "INT. OUTSIDE - DAY".into(),
                 number: Some("S.1".to_string()),
-            }],
+            }]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_heading_forced() {
-        let input = ".OUTSIDE - DAY";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
+        test_screenplay!(
+            parses_heading_forced,
+            ".OUTSIDE - DAY",
+            [Element::Heading {
                 slug: "OUTSIDE - DAY".into(),
                 number: None,
-            }],
+            }]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_heading_forced_with_number() {
-        let input = ".OUTSIDE - DAY #S.1#";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
+        test_screenplay!(
+            parses_heading_forced_with_number,
+            ".OUTSIDE - DAY #S.1#",
+            [Element::Heading {
                 slug: "OUTSIDE - DAY".into(),
                 number: Some("S.1".to_string()),
-            }],
+            }]
         );
 
-        parser_tester(input, correct)
-    }
+        test_screenplay!(
+            parses_action,
+            "They look at the test output - it's all failing.",
+            [Element::Action(
+                "They look at the test output - it's all failing.".into()
+            )]
+        );
 
-    #[test]
-    fn parses_action() {
-        let input = "They look at the test output - it's all failing.";
-        let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_action_forced() {
-        let input = "!INT. They look at the test output - it's all failing.";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Action(
+        test_screenplay!(
+            parses_action_forced,
+            "!INT. They look at the test output - it's all failing.",
+            [Element::Action(
                 "INT. They look at the test output - it's all failing.".into(),
-            )],
+            )]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_without_extension() {
-        let input = r#"
+        test_screenplay!(
+            parses_dialogue_without_extension,
+            r"
 CHAR
 (sad)
 Nooo!
 (angry)
-I am angry.
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
+I am angry.",
+            [Element::Dialogue(Dialogue {
                 character: "CHAR".into(),
                 extension: None,
                 elements: vec![
@@ -677,46 +881,34 @@ I am angry.
                     DialogueElement::Parenthetical("(angry)".into()),
                     DialogueElement::Line("I am angry.".into()),
                 ],
-            })],
+            })]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_with_extension() {
-        let input = r#"
+        test_screenplay!(
+            parses_dialogue_with_extension,
+            r"
 CHAR (V.O)
 (sad)
-Nooo!
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
+Nooo!",
+            [Element::Dialogue(Dialogue {
                 character: "CHAR".into(),
                 extension: Some("V.O".into()),
                 elements: vec![
                     DialogueElement::Parenthetical("(sad)".into()),
                     DialogueElement::Line("Nooo!".into()),
                 ],
-            })],
+            })]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_without_extension_forced() {
-        let input = r#"
+        test_screenplay!(
+            parses_dialogue_without_extension_forced,
+            r"
 @char
 (sad)
 Nooo!
 (angry)
-I am angry.
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
+I am angry.",
+            [Element::Dialogue(Dialogue {
                 character: "char".into(),
                 extension: None,
                 elements: vec![
@@ -725,47 +917,35 @@ I am angry.
                     DialogueElement::Parenthetical("(angry)".into()),
                     DialogueElement::Line("I am angry.".into()),
                 ],
-            })],
+            })]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dialogue_with_extension_forced() {
-        let input = r#"
+        test_screenplay!(
+            parses_dialogue_with_extension_forced,
+            r"
 @char (V.O)
 (sad)
-Nooo!
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Dialogue(Dialogue {
+Nooo!",
+            [Element::Dialogue(Dialogue {
                 character: "char".into(),
                 extension: Some("V.O".into()),
                 elements: vec![
                     DialogueElement::Parenthetical("(sad)".into()),
                     DialogueElement::Line("Nooo!".into()),
                 ],
-            })],
+            })]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_dual_dialogue() {
-        let input = r#"
+        test_screenplay!(
+            parses_dual_dialogue,
+            r"
 @CHaR
 (sad)
 Nooo!
 
 CHOR (V.O) ^
-YES!
-"#;
-        let correct = Screenplay::new(
-            None,
-            vec![Element::DualDialogue(
+YES!",
+            [Element::DualDialogue(
                 Dialogue {
                     character: "CHaR".into(),
                     extension: None,
@@ -779,265 +959,185 @@ YES!
                     extension: Some("V.O".into()),
                     elements: vec![DialogueElement::Line("YES!".into())],
                 },
-            )],
+            )]
         );
 
-        parser_tester(input, correct)
-    }
+        test_screenplay!(
+            parses_lyrics,
+            "~Hey ho let's go",
+            [Element::Lyrics("Hey ho let's go".into())]
+        );
 
-    #[test]
-    fn parses_lyrics() {
-        let input = "~Hey ho let's go";
-        let correct = Screenplay::new(None, vec![Element::Lyrics("Hey ho let's go".into())]);
+        test_screenplay!(
+            parses_transition,
+            "\nCUT TO:\n",
+            [Element::Transition("CUT TO:".into())]
+        );
 
-        parser_tester(input, correct)
-    }
+        test_screenplay!(
+            parses_transition_forced,
+            ">Camera does a spin",
+            [Element::Transition("Camera does a spin".into())]
+        );
 
-    #[test]
-    fn parses_transition() {
-        let input = "\nCUT TO:\n";
-        let correct = Screenplay::new(None, vec![Element::Transition("CUT TO:".into())]);
+        test_screenplay!(
+            parses_centered,
+            "> The end    <",
+            [Element::CenteredText("The end".into())]
+        );
 
-        parser_tester(input, correct)
-    }
+        test_screenplay!(parses_pagebreak_with_3_equals, "===", [Element::PageBreak]);
 
-    #[test]
-    fn parses_transition_forced() {
-        let input = ">Camera does a spin";
-        let correct = Screenplay::new(None, vec![Element::Transition("Camera does a spin".into())]);
+        test_screenplay!(
+            parses_pagebreak_with_8_equals,
+            "========",
+            [Element::PageBreak]
+        );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_centered() {
-        let input = "> The end    <";
-        let correct = Screenplay::new(None, vec![Element::CenteredText("The end".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_pagebreak_with_3_equals() {
-        let input = "===";
-        let correct = Screenplay::new(None, vec![Element::PageBreak]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_pagebreak_with_8_equals() {
-        let input = "========";
-        let correct = Screenplay::new(None, vec![Element::PageBreak]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn parses_synopsis() {
-        let input = "=In this scene everyone gets cake.";
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Synopsis(
+        test_screenplay!(
+            parses_synopsis,
+            "=In this scene everyone gets cake.",
+            [Element::Synopsis(
                 "In this scene everyone gets cake.".into(),
-            )],
+            )]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn does_not_parse_section() {
-        let input = r"
+        test_screenplay!(
+            does_not_parse_section,
+            r"
 # Act 1
 
 INT. HOUSE
 
 ## Montage
 
-House is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
+House is empty.",
+            [
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("House is empty.".into()),
-            ],
+                Element::Action("House is empty.".into())
+            ]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_boneyard() {
-        let input = r"
+        test_screenplay!(
+            filters_out_boneyard,
+            r"
 INT. HOUSE
 
 /* This is a boneyard
                 and should not be parsed
 , you understand?*/
 
-House is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
+House is empty.",
+            [
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("House is empty.".into()),
-            ],
+                Element::Action("House is empty.".into())
+            ]
         );
 
-        parser_tester(input, correct)
-    }
+        test_screenplay!(
+            filters_out_boneyard_inlined,
+            "The house is /*extremely full*/empty.",
+            [Element::Action("The house is empty.".into())]
+        );
 
-    #[test]
-    fn filters_out_boneyard_inlined() {
-        let input = "The house is /*extremely full*/empty.";
-
-        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_boneyard_unended() {
-        let input = r"
+        test_screenplay!(
+            filters_out_boneyard_unended,
+            r"
 INT. HOUSE
 
 /* This is a boneyard
                 and should not be parsed
 , you understand?
 
-House is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![Element::Heading {
+House is empty.",
+            [Element::Heading {
                 slug: "INT. HOUSE".into(),
                 number: None,
-            }],
+            }]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_multiline() {
-        let input = r"
+        test_screenplay!(
+            filters_out_note_multiline,
+            r"
 INT. HOUSE
 
 [[ This is a note
                 and should not be parsed
 , you understand?]]
 
-House is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
+House is empty.",
+            [
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("House is empty.".into()),
-            ],
+                Element::Action("House is empty.".into())
+            ]
         );
 
-        parser_tester(input, correct)
-    }
+        test_screenplay!(
+            filters_out_note_inlined,
+            "The house is [[should it be full?]]empty.",
+            [Element::Action("The house is empty.".into())]
+        );
 
-    #[test]
-    fn filters_out_note_inlined() {
-        let input = "The house is [[should it be full?]]empty.";
-
-        let correct = Screenplay::new(None, vec![Element::Action("The house is empty.".into())]);
-
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_inlined_multiline() {
-        let input = r"
+        test_screenplay!(
+            filters_out_note_inlined_multiline,
+            r"
 INT. HOUSE
 
 The house [[ This is a note
                 and should not be parsed
-, you understand?]]is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
+, you understand?]]is empty.",
+            [
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("The house is empty.".into()),
-            ],
+                Element::Action("The house is empty.".into())
+            ]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn filters_out_note_multiline_empty_newline() {
-        let input = r"
-INT. HOUSE
-
-The house [[This is a note
-  
-                and should not be parsed
-, you understand?]]is empty.";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
+        test_screenplay!(
+            filters_out_note_multiline_empty_newline,
+            "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.",
+            [
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("The house is empty.".into()),
-            ],
+                Element::Action("The house is empty.".into())
+            ]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn not_filters_out_unended_note_multiline() {
-        let input = r"
+        test_screenplay!(
+            not_filters_out_unended_note_multiline,
+            r"
 INT. HOUSE
 
 The house [[wow
 
-no";
-
-        let correct = Screenplay::new(
-            None,
-            vec![
+no",
+            [
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
                 Element::Action("The house [[wow".into()),
-                Element::Action("no".into()),
-            ],
+                Element::Action("no".into())
+            ]
         );
 
-        parser_tester(input, correct)
-    }
-
-    #[test]
-    fn not_filters_out_unended_note() {
-        let input = "This is [[ not right";
-
-        let correct = Screenplay::new(None, vec![Element::Action(input.into())]);
-
-        parser_tester(input, correct)
+        test_screenplay!(
+            not_filters_out_unended_note,
+            "This is [[ not right",
+            [Element::Action("This is [[ not right".into())]
+        );
     }
 }

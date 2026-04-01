@@ -10,12 +10,12 @@ use crate::rich_string::RichString;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Default)]
 pub struct Screenplay {
     pub titlepage: Option<TitlePage>,
-    pub elements: Vec<Element>,
+    pub elements: Vec<Span<Element>>,
 }
 
 impl Screenplay {
     /// Create a new [Screenplay].
-    pub fn new(titlepage: Option<TitlePage>, elements: Vec<Element>) -> Self {
+    pub fn new(titlepage: Option<TitlePage>, elements: Vec<Span<Element>>) -> Self {
         Self {
             titlepage,
             elements,
@@ -25,6 +25,24 @@ impl Screenplay {
     /// Set the [`TitlePage`] on a [`Screenplay`].
     pub fn set_titlepage(&mut self, titlepage: Option<TitlePage>) {
         self.titlepage = titlepage;
+    }
+}
+
+/// Meta information about a [`Element`]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct Span<T> {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub inner: T,
+}
+
+impl<T> Span<T> {
+    pub fn new(inner: T, start_line: usize) -> Self {
+        Self {
+            start_line,
+            end_line: start_line,
+            inner,
+        }
     }
 }
 

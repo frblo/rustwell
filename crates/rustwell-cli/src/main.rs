@@ -80,6 +80,7 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
         Target::Html => Box::new(HtmlExporter {
             standalone: true,
             synopses: cli.synopses,
+            include_source_positions: false,
         }),
         Target::Pdf => Box::new(PdfExporter {
             synopses: cli.synopses,

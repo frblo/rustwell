@@ -1,6 +1,6 @@
 [package]
 name = "rustwell"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 description = "A library for parsing and compiling fountain screenplay scripts."
@@ -14,3 +14,4 @@ path = "src/lib.rs"
 [dependencies]
 bitflags = "2"
 krilla = "0.7.0"
+unicode-properties = "0.1.4"
