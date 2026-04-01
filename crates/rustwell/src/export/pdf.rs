@@ -500,7 +500,7 @@ impl PdfExporter {
 }
 
 /// Writes a diologue [`Element`] to the `pdf` document. If a dialogue spans multiple pages it will
-/// write the character name with the extension `(cont'd)` on each new page. Returns a
+/// write the character name with the extension `(CONT'D)` on each new page. Returns a
 /// [Option<bool>] which is true if the whole dialogue element did not fit on the same page.
 fn write_dialogue(
     layout_info: &LayoutInfo,
@@ -515,7 +515,7 @@ fn write_dialogue(
     let mut character_name = dialogue.character.clone();
     match (*residual_dialogue, &dialogue.extension) {
         (Some(_), _) => {
-            character_name.append(" (cont'd)".into());
+            character_name.append(" (CONT'D)".into());
         }
         (None, Some(ext)) => {
             character_name.append(" (".into());
