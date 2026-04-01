@@ -2,16 +2,28 @@
 
 Rustwell-CLI is a CLI (command line interface) tool for parsing and formatting screenplays written as [Fountain](https://fountain.io/) files. This means this tool can, provided a *Fountain* file, generate a formatted screenplay as, for example, a `pdf` or a `html` file.
 
+## Install
+
+Running the following command will globally install the `rustwell` command.
+
+```sh
+cargo install rustwell-cli
+```
+
 ## Usage
 
 ```sh
-cargo run -- script.fountain -o script.pdf
+rustwell script.fountain
 ```
 
-More details on the CLI tool can be found by running:
+Will produce `script.pdf`. You can also specify the output name with the `-o` flag.
 
 ```sh
-cargo run -- -h
+rustwell script.fountain -o big_play.html
 ```
 
-which will show all current possible output formats.
+More details on usage can be found by running:
+
+```sh
+rustwell -h
+```
