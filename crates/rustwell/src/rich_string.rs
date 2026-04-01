@@ -104,6 +104,19 @@ impl RichString {
 
     /// Given a "global" index, gets the [`Element`] which contains it, and the "local" index
     /// pointing to that character in the element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rustwell::rich_string::RichString;
+    ///
+    /// let mut rs = RichString::from("He**ll**o");
+    ///
+    /// assert!(matches!(rs.get_element_from_index(1), Some((_, 1))));
+    /// assert!(matches!(rs.get_element_from_index(2), Some((_, 0))));
+    /// assert!(matches!(rs.get_element_from_index(3), Some((_, 1))));
+    /// assert!(matches!(rs.get_element_from_index(4), Some((_, 0))));
+    /// ```
     pub fn get_element_from_index(&self, mut index: usize) -> Option<(&Element, usize)> {
         if index >= self.char_count() {
             return None;
@@ -128,9 +141,19 @@ impl RichString {
         }
     }
 
-    /// Appends a [`RichString`] to self. Will not merge the last [`Element`] of self, and the
-    /// first of the other even if they have the same style attributes.
+    /// Appends a [`RichString`] to self. Will merge the last [`Element`] of self, and the
+    /// first of the other if they have the same style attributes.
     pub fn append(&mut self, mut other: Self) {
+        if let Some(e) = other.elements.first()
+            && let Some(l) = self.elements.last_mut()
+        {
+            if e.attributes == l.attributes {
+                l.text.push_str(&e.text);
+                other.elements.drain(..1);
+                self.elements.append(&mut other.elements);
+                return;
+            }
+        }
         self.elements.append(&mut other.elements);
     }
 
@@ -141,6 +164,27 @@ impl RichString {
         let (tokens, mut delimiters) = Self::tokenize(str);
         let matches = Self::match_delimiters(&mut delimiters);
         self.push_parsed(&tokens, &delimiters, &matches);
+    }
+
+    /// Converts the [`RichString`] to a plain [`String`] by just combining the string elements
+    /// without adding delimiters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rustwell::rich_string::RichString;
+    ///
+    /// let mut rs = RichString::from("He**ll**o");
+    ///
+    /// assert_eq!(rs.to_plain_string(), "Hello".to_string());
+    /// ```
+    pub fn to_plain_string(&self) -> String {
+        let mut str = String::with_capacity(self.char_count());
+        for element in &self.elements {
+            str.push_str(&element.text);
+        }
+
+        str
     }
 
     /// Creates a list of "tokens" and [`Delimiter`] runs.
@@ -388,8 +432,25 @@ impl Default for RichString {
 impl Display for RichString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut str = String::with_capacity(self.char_count());
+
         for element in &self.elements {
-            str.push_str(&element.text);
+            macro_rules! attr_to_delim {
+                ($attr:ident, $delimiter:expr) => {
+                    if element.$attr() { $delimiter } else { "" }
+                };
+            }
+
+            let element_text = format!(
+                "{}{}{}{}{}{}{}",
+                attr_to_delim!(is_bold, "**"),
+                attr_to_delim!(is_italic, "*"),
+                attr_to_delim!(is_underline, "_"),
+                element.text,
+                attr_to_delim!(is_underline, "_"),
+                attr_to_delim!(is_italic, "*"),
+                attr_to_delim!(is_bold, "**"),
+            );
+            str.extend(element_text.chars());
         }
 
         write!(f, "{str}")
@@ -502,6 +563,20 @@ struct Match {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appends_same_attributes() {
+        let mut rs: RichString = "a*b*".into();
+        let other: RichString = "*c*d".into();
+        rs.append(other);
+        assert_eq!(rs.elements[1].text, "bc".to_string())
+    }
+
+    #[test]
+    fn displays_with_delims() {
+        let rs: RichString = "H**e**_ll_**_o_**".into();
+        assert_eq!(rs, rs.to_string().into())
+    }
 
     mod tokenize {
         use super::*;

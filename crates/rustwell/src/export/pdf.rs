@@ -379,7 +379,7 @@ impl PdfExporter {
                             )?;
                         }
                         outline.push_child(OutlineNode::new(
-                            slug.to_string(),
+                            slug.to_plain_string(),
                             XyzDestination::new(
                                 page_idx,
                                 Point {
