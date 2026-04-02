@@ -119,7 +119,10 @@ impl HtmlExporter {
                     },
                     self.format_rich_string(slug),
                     if let Some(x) = number {
-                        format!(r#"<span class="scnumr">{x}</span>"#)
+                        format!(
+                            r#"<span class="scnumr">{}</span>"#,
+                            Self::encode_special_html_characters(&x)
+                        )
                     } else {
                         String::new()
                     },
@@ -223,7 +226,10 @@ impl HtmlExporter {
             if element.is_italic() { "</em>" } else { "" },
             if element.is_bold() { "</strong>" } else { "" },
         );
-        format!("{prepend}{}{append}", element.text)
+        format!(
+            "{prepend}{}{append}",
+            Self::encode_special_html_characters(&element.text)
+        )
     }
 
     /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
@@ -247,5 +253,12 @@ impl HtmlExporter {
             }
             DialogueElement::Line(s) => format!(r"<p>{}</p>", self.format_rich_string(s)),
         }
+    }
+
+    /// Encodes potentially dangerous patterns in `html`
+    fn encode_special_html_characters(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 }
