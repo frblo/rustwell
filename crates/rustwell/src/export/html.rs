@@ -33,20 +33,24 @@ impl Exporter for HtmlExporter {
 
     fn export(&self, screenplay: &Screenplay, writer: &mut dyn Write) -> std::io::Result<()> {
         if self.standalone {
-            writeln!(writer, r"<!DOCTYPE html><html>{}", Self::export_head())?;
+            writeln!(
+                writer,
+                r"<!DOCTYPE html><html>{}<body>",
+                Self::export_head()
+            )?;
         }
 
-        writeln!(writer, r#"<body><div id="wrapper" class="screenplay">"#)?;
+        writeln!(writer, r#"<div class="rustwell screenplay">"#)?;
         if let Some(titlepage) = &screenplay.titlepage {
             writeln!(writer, "{}", self.export_titlepage(titlepage))?;
         }
         for e in &screenplay.elements {
             writeln!(writer, "{}", self.export_element(e))?;
         }
-        writeln!(writer, "</div></body>")?;
+        writeln!(writer, "</div>")?;
 
         if self.standalone {
-            writeln!(writer, "</html>")?;
+            writeln!(writer, "</body></html>")?;
         }
         Ok(())
     }
@@ -62,11 +66,16 @@ impl HtmlExporter {
         )
     }
 
+    /// Exports only the `css` for the `html` output.
+    pub fn export_css() -> &'static str {
+        CSS
+    }
+
     /// Exports the [`TitlePage`] to a `html` string.
     fn export_titlepage(&self, titlepage: &TitlePage) -> String {
         format!(
             r#"
-        <div id="title-page">
+        <div class="title-page">
             {}
             {}
             {}

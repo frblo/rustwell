@@ -1,5 +1,9 @@
 /* Reset */
-html,body,div,span,object,iframe,h1,h2,h3,h4,h5,h6,p,blockquote,pre,abbr,address,cite,code,del,dfn,em,img,ins,kbd,q,samp,small,strong,sub,sup,var,b,i,dl,dt,dd,ol,ul,li,fieldset,form,label,legend,table,caption,tbody,tfoot,thead,tr,th,td,article,aside,canvas,details,figcaption,figure,footer,header,hgroup,menu,nav,section,summary,time,mark,audio,video {
+.rustwell div,
+.rustwell p,
+.rustwell span,
+.rustwell strong,
+.rustwell em {
     margin: 0;
     padding: 0;
     border: 0;
@@ -7,182 +11,204 @@ html,body,div,span,object,iframe,h1,h2,h3,h4,h5,h6,p,blockquote,pre,abbr,address
     font: inherit;
     vertical-align: baseline;
 }
-article,aside,details,figcaption,figure,footer,header,hgroup,menu,nav,section {
-    display: block;
-}
 
-body {
-    text-align: center;
-}
-#wrapper {
-    font-family: 'Courier Final Draft','Courier Screenplay',Courier;
+/* Wrapper */
+.rustwell {
+    font-family: 'Courier Final Draft', 'Courier Screenplay', Courier, monospace;
     font-size: 12pt;
     text-align: left;
-    width: 480pt;
-    padding-left: 90pt;
-    padding-top: 24pt;
+    width: 40em;
+    padding-left: 7.5em;
+    padding-top: 2em;
     position: relative;
     margin: 0 auto;
 }
-header {
+
+.rustwell header {
     margin-bottom: 1em;
     border-bottom: 1px solid black;
 }
-footer {
+
+.rustwell footer {
     margin-top: 1em;
 }
-em {
+
+.rustwell em {
     font-style: italic;
 }
-strong {
+
+.rustwell strong {
     font-weight: bold;
 }
-br {
+
+.rustwell br {
     clear: both;
 }
 
 /* Title Page */
-
-#title-page {
-    font-family: 'Courier Final Draft','Courier Screenplay',Courier,monospace;
-    font-size: 12pt;
-    width: 480pt;
-    margin: 0 auto;
-    padding-top: 144pt;
+.rustwell .title-page {
+    padding-top: 12em;
     text-align: center;
     page-break-after: always;
 }
-#title-page div {
-    margin-bottom: 12pt;
+
+.rustwell .title-page div {
+    margin-bottom: 1em;
 }
-#title-page p {
+
+.rustwell .title-page p {
     margin: 0.5em 0;
     line-height: 1.4;
 }
-#title-page .title p {
-    font-size: 18pt;
+
+.rustwell .title-page .title p {
+    font-size: 1.5em;
     text-transform: uppercase;
     font-weight: bold;
     margin-bottom: 0.5em;
 }
-#title-page .credit p {
+
+.rustwell .title-page .credit p {
     font-style: italic;
     margin-bottom: 1em;
 }
-#title-page .authors p {
+
+.rustwell .title-page .authors p {
     margin-bottom: 0.5em;
 }
-#title-page .source p {
+
+.rustwell .title-page .source p {
     font-style: italic;
     margin-bottom: 1em;
 }
-#title-page .draft_date p {
+
+.rustwell .title-page .draft_date p {
     margin-top: 2em;
     margin-bottom: 1em;
 }
-#title-page .contact {
+
+.rustwell .title-page .contact {
     text-align: left;
-    width: 240pt;
+    width: 20em;
     margin: 2em auto 0 auto;
 }
-#title-page .contact p {
-    font-size: 10pt;
+
+.rustwell .title-page .contact p {
+    font-size: 0.83em;
     line-height: 1.3;
 }
 
-/* Slug */
-div {
-    width: 460pt;
-}
-div.scene-heading {
+/* Scenes */
+.rustwell div.scene-heading {
+    width: 38.3em;
     margin-top: 2em;
     text-transform: uppercase;
     font-weight: bold;
 }
-div.block {
+
+.rustwell div.block {
+    width: 38.3em;
     position: relative;
-    background: #fff;
 }
-div.action p {
+
+.rustwell div.action {
+    width: 38.3em;
+}
+
+.rustwell div.action p {
     margin-top: 1em;
 }
-.centered {
+
+.rustwell .centered {
     text-align: center;
 }
-div.dialogue,div.dual {
+
+.rustwell div.dialogue,
+.rustwell div.dual {
+    width: 38.3em;
     margin-top: 1em;
     overflow: hidden;
 }
-div.transition {
+
+.rustwell div.transition {
+    width: 38.3em;
     margin-top: 1em;
-    margin-bottom: 12pt;
+    margin-bottom: 1em;
     text-align: right;
 }
-.dialogue p.character {
-    padding-left: 153.33pt;
+
+/* Dialogue */
+.rustwell .dialogue p.character {
+    padding-left: 12.8em;
 }
-.dialogue p.parenthetical {
-    padding-left: 115pt;
+
+.rustwell .dialogue p.parenthetical {
+    padding-left: 9.6em;
 }
-.dialogue p {
-    padding-left: 76.67pt;
-    width: 306.67pt;
+
+.rustwell .dialogue p {
+    padding-left: 6.4em;
+    width: 25.6em;
 }
-.dual > div {
+
+/* Dual Dialogue */
+.rustwell .dual > div {
     float: left;
-    width: 48%!important;
+    width: 48% !important;
 }
-.dual p.character {
+
+.rustwell .dual p.character {
     padding-left: 6em;
 }
-.dual p.parenthetical {
+
+.rustwell .dual p.parenthetical {
     padding-left: 3em;
 }
-.dual p {
+
+.rustwell .dual p {
     padding-left: 0;
     width: 19em;
 }
-.dual .right {
+
+.rustwell .dual .right {
     margin-left: 1em;
 }
-.dual .right p.character {
+
+.rustwell .dual .right p.character {
     padding-left: 6em;
 }
-.lyrics p {
-    padding-left: 76.67pt;
-    width: 306.67pt;
+
+/* Lyrics */
+.rustwell .lyrics p {
+    padding-left: 6.4em;
+    width: 25.6em;
     text-transform: uppercase;
 }
-.synopsis p {
+
+/* Synopsis */
+.rustwell .synopsis p {
     padding-left: 2em;
-    color:rgb(145, 145, 145);
+    color: rgb(145, 145, 145);
 }
-span.scnuml {
+
+/* Scene Numbers */
+.rustwell span.scnuml {
     display: block;
     float: left;
     margin-left: -4.52em;
     font-weight: inherit;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    -khtml-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    -o-user-select: none;
     user-select: none;
 }
-span.scnumr {
+
+.rustwell span.scnumr {
     display: block;
     float: right;
-    margin-right: 0.72em;
+    margin-right: -2.42em;
     font-weight: inherit;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    -khtml-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    -o-user-select: none;
     user-select: none;
 }
-.page-break {
+
+/* Page Break */
+.rustwell .page-break {
     page-break-before: always;
 }
