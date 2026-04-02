@@ -119,7 +119,7 @@ impl HtmlExporter {
                     },
                     self.format_rich_string(slug),
                     if let Some(x) = number {
-                        format!(r#"<span class="scnumr">{x}</span>"#)
+                        format!(r#"<span class="scnumr">{}</span>"#, Self::encode_html(&x))
                     } else {
                         String::new()
                     },
@@ -197,11 +197,13 @@ impl HtmlExporter {
 
     /// Formats a [`RichString`] into a `html`-[String].
     fn format_rich_string(&self, str: &RichString) -> String {
-        str.elements
-            .iter()
-            .map(|e| self.format_rich_element(e))
-            .collect::<Vec<String>>()
-            .concat()
+        Self::encode_html(
+            &str.elements
+                .iter()
+                .map(|e| self.format_rich_element(e))
+                .collect::<Vec<String>>()
+                .concat(),
+        )
     }
 
     /// Formats a [`RichString`] [`rich_string::Element`] into a `html`-[String].
@@ -247,5 +249,12 @@ impl HtmlExporter {
             }
             DialogueElement::Line(s) => format!(r"<p>{}</p>", self.format_rich_string(s)),
         }
+    }
+
+    /// Encodes potentially dangerous patterns in `html`
+    fn encode_html(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 }
