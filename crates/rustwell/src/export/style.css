@@ -1,15 +1,13 @@
 /* Reset */
-.rustwell div,
-.rustwell p,
-.rustwell span,
-.rustwell strong,
-.rustwell em {
+.rustwell,
+.rustwell * {
     margin: 0;
     padding: 0;
     border: 0;
     font-size: 100%;
     font: inherit;
     vertical-align: baseline;
+    box-sizing: content-box;
 }
 
 /* Wrapper */
