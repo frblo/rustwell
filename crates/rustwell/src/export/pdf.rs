@@ -454,7 +454,7 @@ impl PdfExporter {
                         }
                     }
                     Element::Lyrics(s) => {
-                        write_element!(s, &MARGINS.lyrics, Alignment::RightToLeft);
+                        write_element!(s, &MARGINS.lyrics, Alignment::LeftToRight);
                     }
                     Element::Transition(s) => {
                         write_element!(s, &MARGINS.transition, Alignment::RightToLeft);
