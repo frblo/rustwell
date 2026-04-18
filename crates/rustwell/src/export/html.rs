@@ -214,15 +214,11 @@ impl HtmlExporter {
             .map(|e| self.format_rich_element(e))
             .collect::<Vec<String>>()
             .concat()
+            .replace("\n", "<br>")
     }
 
     /// Formats a [`RichString`] [`rich_string::Element`] into a `html`-[String].
     fn format_rich_element(&self, element: &rich_string::Element) -> String {
-        // Assumes newlines '\n' will only occur sole elements
-        if element.text == "\n" {
-            return "<br />".to_string();
-        }
-
         let prepend = format!(
             "{}{}{}",
             if element.is_bold() { "<strong>" } else { "" },
