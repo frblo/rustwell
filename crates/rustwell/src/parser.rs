@@ -1157,11 +1157,11 @@ no",
 
         test_screenplay!(
             dialogue_with_whiteline_in_middle,
-            "NAME\nThis dialogue should visibly have a line bellow it.\n  \nVisually separating it from this line, due to the two spaces at the start of the previous line.",
+            "NAME\nThis dialogue should visibly have a line below it.\n  \nVisually separating it from this line, due to the two spaces at the start of the previous line.",
             [Element::Dialogue(Dialogue {
                 character: "NAME".into(),
                 extension: None,
-                elements: vec![DialogueElement::Line("This dialogue should visibly have a line bellow it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into())]
+                elements: vec![DialogueElement::Line("This dialogue should visibly have a line below it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into())]
             })]
         );
     }
