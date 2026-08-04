@@ -1159,7 +1159,7 @@ no",
             dialogue_with_whiteline_in_middle,
             "NAME\nThis dialogue should visibly have a line bellow it.\n  \nVisually separating it from this line, due to the two spaces at the start of the previous line.",
             [Element::Dialogue(Dialogue {
-                character: "EMIL".into(),
+                character: "NAME".into(),
                 extension: None,
                 elements: vec![DialogueElement::Line("This dialogue should visibly have a line bellow it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into())]
             })]
