@@ -98,7 +98,7 @@ impl<'a> Parser<'a> {
                         .expect("Must exist since we are in dialogue block");
                     *end_line = i;
 
-                    if trimmed.starts_with('(') {
+                    if trimmed.starts_with('(') && trimmed.ends_with(')') {
                         curr_dialogue
                             .elements
                             .push(DialogueElement::Parenthetical(RichString::from(trimmed)));
@@ -1138,6 +1138,16 @@ no",
             not_filters_out_unended_note,
             "This is [[ not right",
             [Element::Action("This is [[ not right".into())]
+        );
+
+        test_screenplay!(
+            parenthetical_must_be_closed,
+            "NAME\n(This is dialogue",
+            [Element::Dialogue(Dialogue {
+                character: "NAME".into(),
+                extension: None,
+                elements: vec![DialogueElement::Line("(This is dialogue".into())]
+            })]
         );
     }
 }
