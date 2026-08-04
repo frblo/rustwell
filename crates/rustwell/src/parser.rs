@@ -105,9 +105,14 @@ impl<'a> Parser<'a> {
                         continue;
                     }
 
-                    curr_dialogue
-                        .elements
-                        .push(DialogueElement::Line(RichString::from(trimmed)));
+                    if let Some(DialogueElement::Line(rs)) = curr_dialogue.elements.last_mut() {
+                        rs.push_str("\n");
+                        rs.push_str(trimmed);
+                    } else {
+                        curr_dialogue
+                            .elements
+                            .push(DialogueElement::Line(RichString::from(trimmed)));
+                    }
                 }
                 State::InBlock => {
                     if self.try_centered(trimmed, i)
@@ -1147,6 +1152,16 @@ no",
                 character: "NAME".into(),
                 extension: None,
                 elements: vec![DialogueElement::Line("(This is dialogue".into())]
+            })]
+        );
+
+        test_screenplay!(
+            dialogue_with_whiteline_in_middle,
+            "NAME\nThis dialogue should visibly have a line bellow it.\n  \nVisually separating it from this line, due to the two spaces at the start of the previous line.",
+            [Element::Dialogue(Dialogue {
+                character: "EMIL".into(),
+                extension: None,
+                elements: vec![DialogueElement::Line("This dialogue should visibly have a line bellow it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into())]
             })]
         );
     }
