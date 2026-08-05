@@ -98,16 +98,21 @@ impl<'a> Parser<'a> {
                         .expect("Must exist since we are in dialogue block");
                     *end_line = i;
 
-                    if trimmed.starts_with('(') {
+                    if trimmed.starts_with('(') && trimmed.ends_with(')') {
                         curr_dialogue
                             .elements
                             .push(DialogueElement::Parenthetical(RichString::from(trimmed)));
                         continue;
                     }
 
-                    curr_dialogue
-                        .elements
-                        .push(DialogueElement::Line(RichString::from(trimmed)));
+                    if let Some(DialogueElement::Line(rs)) = curr_dialogue.elements.last_mut() {
+                        rs.push_str("\n");
+                        rs.push_str(trimmed);
+                    } else {
+                        curr_dialogue
+                            .elements
+                            .push(DialogueElement::Line(RichString::from(trimmed)));
+                    }
                 }
                 State::InBlock => {
                     if self.try_centered(trimmed, i)
@@ -1138,6 +1143,26 @@ no",
             not_filters_out_unended_note,
             "This is [[ not right",
             [Element::Action("This is [[ not right".into())]
+        );
+
+        test_screenplay!(
+            parenthetical_must_be_closed,
+            "NAME\n(This is dialogue",
+            [Element::Dialogue(Dialogue {
+                character: "NAME".into(),
+                extension: None,
+                elements: vec![DialogueElement::Line("(This is dialogue".into())]
+            })]
+        );
+
+        test_screenplay!(
+            dialogue_with_whiteline_in_middle,
+            "NAME\nThis dialogue should visibly have a line below it.\n  \nVisually separating it from this line, due to the two spaces at the start of the previous line.",
+            [Element::Dialogue(Dialogue {
+                character: "NAME".into(),
+                extension: None,
+                elements: vec![DialogueElement::Line("This dialogue should visibly have a line below it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into())]
+            })]
         );
     }
 }
