@@ -659,7 +659,11 @@ fn write_element_custom_top_margin(
         let start_index = if *breakpoint_index == 0 {
             0
         } else {
-            breakpoints[*breakpoint_index - 1].index
+            let bp = &breakpoints[*breakpoint_index - 1];
+            match bp.skip_to {
+                Some(skip) => skip,
+                None => bp.index,
+            }
         };
         write_line(
             layout_info,
@@ -964,6 +968,7 @@ enum BreakType {
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 struct BreakPoint {
     pub index: usize,
+    pub skip_to: Option<usize>,
     /// If it should add a newline after a word, or inside a word.
     pub break_type: BreakType,
 }
@@ -976,43 +981,124 @@ struct BreakPoint {
 fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
     debug_assert!(span >= 2);
 
-    let mut brekpoints = Vec::with_capacity(content.char_count() / span + 1);
-    let mut last_whitespace_char = (0, 0);
+    struct CharacterSpan {
+        start_index: usize,
+        end_index: usize,
+    }
+
+    let mut breakpoints = Vec::with_capacity(content.char_count() / span + 1);
+    let mut last_whitespace_char = None;
+    let mut in_whitespace = false;
+    let mut last_hyphen = None;
     let mut line_len = 0;
     for (i, glyph) in content.iter().enumerate() {
         line_len += 1;
         if glyph == '\n' {
-            brekpoints.push(BreakPoint {
+            breakpoints.push(BreakPoint {
                 index: i,
+                skip_to: None,
                 break_type: BreakType::NewLine,
             });
             line_len = 0;
+            last_whitespace_char = None;
+            last_hyphen = None;
             continue;
         }
 
-        if glyph.is_whitespace() || glyph == '-' {
-            last_whitespace_char = (brekpoints.len() + 1, i);
+        if glyph.is_whitespace() {
+            if in_whitespace {
+                last_whitespace_char = match last_whitespace_char {
+                    Some(CharacterSpan {
+                        start_index,
+                        end_index: _,
+                    }) => Some(CharacterSpan {
+                        start_index,
+                        end_index: i + 1,
+                    }),
+                    None => unreachable!(),
+                };
+            } else {
+                last_whitespace_char = Some(CharacterSpan {
+                    start_index: i,
+                    end_index: i + 1,
+                });
+                in_whitespace = true;
+            }
             continue;
+        } else if glyph == '-' {
+            last_hyphen = Some(CharacterSpan {
+                start_index: i,
+                end_index: i + 1,
+            });
         }
+        in_whitespace = false;
 
         if line_len >= span {
-            if brekpoints.len() + 1 != last_whitespace_char.0 {
-                brekpoints.push(BreakPoint {
-                    index: i,
-                    break_type: BreakType::BreakWord,
-                });
-                line_len = 0;
-                continue;
-            }
-
-            brekpoints.push(BreakPoint {
-                index: last_whitespace_char.1 + 1,
-                break_type: BreakType::NewLine,
-            });
-            line_len = i - last_whitespace_char.1;
+            match (&last_whitespace_char, &last_hyphen) {
+                (
+                    None,
+                    Some(CharacterSpan {
+                        start_index: _,
+                        end_index,
+                    }),
+                ) => {
+                    breakpoints.push(BreakPoint {
+                        index: *end_index,
+                        skip_to: None,
+                        break_type: BreakType::NewLine,
+                    });
+                }
+                (
+                    Some(CharacterSpan {
+                        start_index,
+                        end_index,
+                    }),
+                    None,
+                ) => {
+                    breakpoints.push(BreakPoint {
+                        index: *start_index,
+                        skip_to: Some(*end_index),
+                        break_type: BreakType::NewLine,
+                    });
+                }
+                (
+                    Some(CharacterSpan {
+                        start_index: w_start_index,
+                        end_index: w_end_index,
+                    }),
+                    Some(CharacterSpan {
+                        start_index: h_start_index,
+                        end_index: h_end_index,
+                    }),
+                ) => {
+                    if h_start_index >= w_start_index {
+                        breakpoints.push(BreakPoint {
+                            index: *h_end_index,
+                            skip_to: None,
+                            break_type: BreakType::NewLine,
+                        });
+                    } else {
+                        breakpoints.push(BreakPoint {
+                            index: *w_start_index,
+                            skip_to: Some(*w_end_index),
+                            break_type: BreakType::NewLine,
+                        });
+                    }
+                }
+                (None, None) => {
+                    breakpoints.push(BreakPoint {
+                        index: i,
+                        skip_to: None,
+                        break_type: BreakType::BreakWord,
+                    });
+                }
+            };
+            line_len = 0;
+            last_whitespace_char = None;
+            last_hyphen = None;
         }
     }
-    brekpoints
+    breakpoints
 }
 
 #[cfg(test)]
@@ -1026,7 +1112,8 @@ mod tests {
 
         let breakpoints = break_points(&rs, 6);
         let correct = vec![BreakPoint {
-            index: 6,
+            index: 5,
+            skip_to: Some(6),
             break_type: BreakType::NewLine,
         }];
 
@@ -1041,6 +1128,7 @@ mod tests {
         let breakpoints = break_points(&rs, 100);
         let correct = vec![BreakPoint {
             index: 5,
+            skip_to: None,
             break_type: BreakType::NewLine,
         }];
 
@@ -1055,6 +1143,7 @@ mod tests {
         let breakpoints = break_points(&rs, 6);
         let correct = vec![BreakPoint {
             index: 5,
+            skip_to: None,
             break_type: BreakType::BreakWord,
         }];
 
@@ -1069,6 +1158,7 @@ mod tests {
         let breakpoints = break_points(&rs, 7);
         let correct = vec![BreakPoint {
             index: 6,
+            skip_to: None,
             break_type: BreakType::NewLine,
         }];
 
@@ -1082,7 +1172,8 @@ mod tests {
 
         let breakpoints = break_points(&rs, 6);
         let correct = vec![BreakPoint {
-            index: 6,
+            index: 5,
+            skip_to: Some(6),
             break_type: BreakType::NewLine,
         }];
 
@@ -1096,7 +1187,23 @@ mod tests {
 
         let breakpoints = break_points(&rs, 60);
         let correct = vec![BreakPoint {
-            index: 56,
+            index: 55,
+            skip_to: Some(56),
+            break_type: BreakType::NewLine,
+        }];
+
+        assert_eq!(breakpoints, correct);
+    }
+
+    #[test]
+    fn breaks_simple_long_whitespace() {
+        let mut rs = RichString::new();
+        rs.push_str("hello                     world");
+
+        let breakpoints = break_points(&rs, 6);
+        let correct = vec![BreakPoint {
+            index: 5,
+            skip_to: Some(26),
             break_type: BreakType::NewLine,
         }];
 
