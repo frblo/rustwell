@@ -15,5 +15,5 @@ doc = false
 
 [dependencies]
 rustwell = { version = "0.3.0", path = "../rustwell" }
-clap = { version = "4.5", features = ["derive"]}
-color-eyre = "0.6"
+clap = { version = "4.6", features = ["derive"]}
+color-eyre = "0.6.5"

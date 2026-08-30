@@ -12,6 +12,6 @@ categories = ["parser-implementations"]
 path = "src/lib.rs"
 
 [dependencies]
-bitflags = "2"
-krilla = "0.7.0"
+bitflags = "2.13.1"
+krilla = "0.8.2"
 unicode-properties = "0.1.4"
