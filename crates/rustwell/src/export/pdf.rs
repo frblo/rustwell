@@ -988,7 +988,6 @@ fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
 
     let mut breakpoints = Vec::with_capacity(content.char_count() / span + 1);
     let mut last_whitespace_char = None;
-    let mut in_whitespace = false;
     let mut last_hyphen = None;
     let mut line_len = 0;
     for (i, glyph) in content.iter().enumerate() {
@@ -1006,24 +1005,20 @@ fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
         }
 
         if glyph.is_whitespace() {
-            if in_whitespace {
-                last_whitespace_char = match last_whitespace_char {
-                    Some(CharacterSpan {
-                        start_index,
-                        end_index: _,
-                    }) => Some(CharacterSpan {
-                        start_index,
-                        end_index: i + 1,
-                    }),
-                    None => unreachable!(),
-                };
-            } else {
-                last_whitespace_char = Some(CharacterSpan {
+            last_whitespace_char = match last_whitespace_char {
+                Some(CharacterSpan {
+                    start_index,
+                    end_index,
+                }) if end_index == i => CharacterSpan {
+                    start_index,
+                    end_index: i + 1,
+                },
+                _ => CharacterSpan {
                     start_index: i,
                     end_index: i + 1,
-                });
-                in_whitespace = true;
+                },
             }
+            .into();
             continue;
         } else if glyph == '-' {
             last_hyphen = Some(CharacterSpan {
@@ -1031,7 +1026,6 @@ fn break_points(content: &RichString, span: usize) -> Vec<BreakPoint> {
                 end_index: i + 1,
             });
         }
-        in_whitespace = false;
 
         if line_len >= span {
             match (&last_whitespace_char, &last_hyphen) {
