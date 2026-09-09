@@ -96,7 +96,7 @@ impl HtmlExporter {
     /// on the [`TitlePage`] to a `html` string. If there are no [`RichString`]s
     /// we do not include the value on the [`TitlePage`],
     /// and only return `""` here.
-    fn export_titlepage_element(&self, value: &str, element: &[RichString]) -> String {
+    fn export_titlepage_element(&self, value: &str, element: &[Span<RichString>]) -> String {
         if element.is_empty() {
             return String::new();
         }

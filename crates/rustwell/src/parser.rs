@@ -439,7 +439,7 @@ impl<'a> Parser<'a> {
     fn parse_title(&mut self) {
         let mut tp = TitlePage::new();
 
-        while let Some((_, line)) = self.lines.peek() {
+        while let Some((i, line)) = self.lines.peek() {
             let Some((key, val)) = line.split_once(':') else {
                 break;
             };
@@ -450,7 +450,7 @@ impl<'a> Parser<'a> {
             if val.trim().is_empty() {
                 values = self.take_indented_block();
             } else {
-                values.push(RichString::from(val));
+                values.push(Span::new(RichString::from(val), *i));
             }
 
             match key.trim().to_ascii_uppercase().as_str() {
@@ -479,12 +479,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn take_indented_block(&mut self) -> Vec<RichString> {
+    fn take_indented_block(&mut self) -> Vec<Span<RichString>> {
         let mut out = Vec::new();
-        while let Some((_, next)) = self.lines.peek().copied() {
+        while let Some((i, next)) = self.lines.peek().copied() {
             if next.starts_with("   ") {
                 self.lines.next();
-                out.push(RichString::from(next.trim()));
+                out.push(Span::new(RichString::from(next.trim()), *i));
             } else {
                 break;
             }

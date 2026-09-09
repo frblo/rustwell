@@ -36,6 +36,14 @@ pub struct Span<T> {
     pub inner: T,
 }
 
+impl<T> std::ops::Deref for Span<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 impl<T> Span<T> {
     pub fn new(inner: T, start_line: usize) -> Self {
         Self {
@@ -103,12 +111,12 @@ pub enum DialogueElement {
 /// according to the fountain specification.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct TitlePage {
-    pub title: Vec<RichString>,
-    pub credit: Vec<RichString>,
-    pub authors: Vec<RichString>,
-    pub source: Vec<RichString>,
-    pub draft_date: Vec<RichString>,
-    pub contact: Vec<RichString>,
+    pub title: Vec<Span<RichString>>,
+    pub credit: Vec<Span<RichString>>,
+    pub authors: Vec<Span<RichString>>,
+    pub source: Vec<Span<RichString>>,
+    pub draft_date: Vec<Span<RichString>>,
+    pub contact: Vec<Span<RichString>>,
 }
 
 impl TitlePage {
