@@ -103,7 +103,13 @@ impl HtmlExporter {
 
         let content = element
             .iter()
-            .map(|s| format!("<p>{}</p>", self.format_rich_string(s)))
+            .map(|s| {
+                format!(
+                    "<p {}>{}</p>",
+                    self.source_position_attrs(s.start_line, s.end_line),
+                    self.format_rich_string(s)
+                )
+            })
             .collect::<Vec<String>>()
             .concat();
 
@@ -183,14 +189,7 @@ impl HtmlExporter {
         format!(
             r#"<div class="{}" {}>{}</div>"#,
             class,
-            if self.include_source_positions {
-                format!(
-                    r#"data-start-line="{}" data-end-line="{}""#,
-                    element.start_line, element.end_line
-                )
-            } else {
-                String::new()
-            },
+            self.source_position_attrs(element.start_line, element.end_line),
             content
         )
     }
@@ -248,15 +247,16 @@ impl HtmlExporter {
     }
 
     /// Formats a [`DialogueElement`] into a `html`-[String].
-    fn format_dialogue_element(&self, element: &DialogueElement) -> String {
-        match element {
+    fn format_dialogue_element(&self, element: &Span<DialogueElement>) -> String {
+        let attrs = self.source_position_attrs(element.start_line, element.end_line);
+        match &element.inner {
             DialogueElement::Parenthetical(s) => {
                 format!(
-                    r#"<p class="parenthetical">{}</p>"#,
+                    r#"<p class="parenthetical" {attrs}>{}</p>"#,
                     self.format_rich_string(s)
                 )
             }
-            DialogueElement::Line(s) => format!(r"<p>{}</p>", self.format_rich_string(s)),
+            DialogueElement::Line(s) => format!(r"<p {attrs}>{}</p>", self.format_rich_string(s)),
         }
     }
 
@@ -265,5 +265,15 @@ impl HtmlExporter {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")
             .replace('>', "&gt;")
+    }
+
+    /// Renders the `data-start-line`/`data-end-line` attributes for a span, or an empty string
+    /// if [`Self::include_source_positions`] is disabled.
+    fn source_position_attrs(&self, start_line: usize, end_line: usize) -> String {
+        if self.include_source_positions {
+            format!(r#"data-start-line="{start_line}" data-end-line="{end_line}""#)
+        } else {
+            String::new()
+        }
     }
 }
