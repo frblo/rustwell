@@ -99,19 +99,27 @@ impl<'a> Parser<'a> {
                     *end_line = i;
 
                     if trimmed.starts_with('(') && trimmed.ends_with(')') {
-                        curr_dialogue
-                            .elements
-                            .push(DialogueElement::Parenthetical(RichString::from(trimmed)));
+                        curr_dialogue.elements.push(Span::new(
+                            DialogueElement::Parenthetical(RichString::from(trimmed)),
+                            i,
+                        ));
                         continue;
                     }
 
-                    if let Some(DialogueElement::Line(rs)) = curr_dialogue.elements.last_mut() {
+                    if let Some(Span {
+                        inner: DialogueElement::Line(rs),
+                        start_line: _,
+                        end_line,
+                    }) = curr_dialogue.elements.last_mut()
+                    {
                         rs.push_str("\n");
                         rs.push_str(trimmed);
+                        *end_line = i;
                     } else {
-                        curr_dialogue
-                            .elements
-                            .push(DialogueElement::Line(RichString::from(trimmed)));
+                        curr_dialogue.elements.push(Span::new(
+                            DialogueElement::Line(RichString::from(trimmed)),
+                            i,
+                        ));
                     }
                 }
                 State::InBlock => {
@@ -796,6 +804,10 @@ mod tests {
             };
         }
 
+        fn span<T>(inner: T) -> Span<T> {
+            Span::new(inner, 0)
+        }
+
         fn test_parse(input: &str, expected: impl IntoIterator<Item = Element>) {
             let parsed = parse(input);
             for (
@@ -881,10 +893,10 @@ I am angry.",
                 character: "CHAR".into(),
                 extension: None,
                 elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                    DialogueElement::Parenthetical("(angry)".into()),
-                    DialogueElement::Line("I am angry.".into()),
+                    span(DialogueElement::Parenthetical("(sad)".into())),
+                    span(DialogueElement::Line("Nooo!".into())),
+                    span(DialogueElement::Parenthetical("(angry)".into())),
+                    span(DialogueElement::Line("I am angry.".into())),
                 ],
             })]
         );
@@ -899,8 +911,8 @@ Nooo!",
                 character: "CHAR".into(),
                 extension: Some("V.O".into()),
                 elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
+                    span(DialogueElement::Parenthetical("(sad)".into())),
+                    span(DialogueElement::Line("Nooo!".into())),
                 ],
             })]
         );
@@ -917,10 +929,10 @@ I am angry.",
                 character: "char".into(),
                 extension: None,
                 elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
-                    DialogueElement::Parenthetical("(angry)".into()),
-                    DialogueElement::Line("I am angry.".into()),
+                    span(DialogueElement::Parenthetical("(sad)".into())),
+                    span(DialogueElement::Line("Nooo!".into())),
+                    span(DialogueElement::Parenthetical("(angry)".into())),
+                    span(DialogueElement::Line("I am angry.".into())),
                 ],
             })]
         );
@@ -935,8 +947,8 @@ Nooo!",
                 character: "char".into(),
                 extension: Some("V.O".into()),
                 elements: vec![
-                    DialogueElement::Parenthetical("(sad)".into()),
-                    DialogueElement::Line("Nooo!".into()),
+                    span(DialogueElement::Parenthetical("(sad)".into())),
+                    span(DialogueElement::Line("Nooo!".into())),
                 ],
             })]
         );
@@ -955,14 +967,14 @@ YES!",
                     character: "CHaR".into(),
                     extension: None,
                     elements: vec![
-                        DialogueElement::Parenthetical("(sad)".into()),
-                        DialogueElement::Line("Nooo!".into()),
+                        span(DialogueElement::Parenthetical("(sad)".into())),
+                        span(DialogueElement::Line("Nooo!".into())),
                     ],
                 },
                 Dialogue {
                     character: "CHOR".into(),
                     extension: Some("V.O".into()),
-                    elements: vec![DialogueElement::Line("YES!".into())],
+                    elements: vec![span(DialogueElement::Line("YES!".into()))],
                 },
             )]
         );
@@ -1151,7 +1163,7 @@ no",
             [Element::Dialogue(Dialogue {
                 character: "NAME".into(),
                 extension: None,
-                elements: vec![DialogueElement::Line("(This is dialogue".into())]
+                elements: vec![span(DialogueElement::Line("(This is dialogue".into()))]
             })]
         );
 
@@ -1161,7 +1173,7 @@ no",
             [Element::Dialogue(Dialogue {
                 character: "NAME".into(),
                 extension: None,
-                elements: vec![DialogueElement::Line("This dialogue should visibly have a line below it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into())]
+                elements: vec![span(DialogueElement::Line("This dialogue should visibly have a line below it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into()))]
             })]
         );
     }

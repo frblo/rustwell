@@ -239,7 +239,7 @@ impl HtmlExporter {
 
     /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
     /// [`DialogueElement`]s.
-    fn format_dialogue(&self, dialogue: &[DialogueElement]) -> String {
+    fn format_dialogue(&self, dialogue: &[Span<DialogueElement>]) -> String {
         dialogue
             .iter()
             .map(|d| self.format_dialogue_element(d))

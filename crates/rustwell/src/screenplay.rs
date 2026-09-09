@@ -28,12 +28,34 @@ impl Screenplay {
     }
 }
 
-/// Meta information about a [`Element`]
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+/// Meta information about some part of the screenplay.
+///
+/// Equality and comparisons are based on `inner` alone.
+#[derive(Debug, Clone)]
 pub struct Span<T> {
     pub start_line: usize,
     pub end_line: usize,
     pub inner: T,
+}
+
+impl<T: PartialEq> PartialEq for Span<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<T: Eq> Eq for Span<T> {}
+
+impl<T: std::hash::Hash> std::hash::Hash for Span<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.hash(state);
+    }
+}
+
+impl<T> std::ops::DerefMut for Span<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
 
 impl<T> std::ops::Deref for Span<T> {
@@ -81,7 +103,7 @@ pub enum Element {
 pub struct Dialogue {
     pub character: RichString,
     pub extension: Option<RichString>,
-    pub elements: Vec<DialogueElement>,
+    pub elements: Vec<Span<DialogueElement>>,
 }
 
 impl Dialogue {
