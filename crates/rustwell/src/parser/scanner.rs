@@ -35,10 +35,9 @@ pub struct LogicalLine {
 }
 
 impl LogicalLine {
-    /// The visible content of the line.
+    /// The visible content of the line, that is its [`Segment::Text`] pieces joined.
     ///
-    /// This is done by joinging its [`Segment::Text`] pieces.
-    /// Borrows when possible, that is when there is zero or one [`Segment::Text`].
+    /// Borrows when possible, that is with zero or one [`Segment::Text`].
     pub fn text<'s>(&self, src: &'s str) -> Cow<'s, str> {
         let mut texts = self.segments.iter().filter_map(|segment| match segment {
             Segment::Text(span) => Some(&src[*span]),
@@ -72,7 +71,8 @@ pub enum Segment {
 /// A `/* */` boneyard located in the source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Boneyard {
-    /// The whole boneyard including eventual delimiters.
+    /// The whole boneyard: `/*`, the content, and `*/` when present (an
+    /// unterminated boneyard runs to end of input).
     pub span: Span,
     /// The content between the delimiters.
     pub inner: Span,
@@ -80,20 +80,20 @@ pub struct Boneyard {
 
 /// A `[[ ]]` closed note located in the source.
 ///
-/// A `[[` with no matching `]]` before a blank line or end of input is
-/// not closed and therefore not a [`Note`].
+/// A `[[` with no matching `]]` before a blank line or end of input is not
+/// closed and therefore not a [`Note`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Note {
-    /// The whole note including eventual delimiters.
+    /// The whole note: `[[`, the content, and `]]`.
     pub span: Span,
     /// The content between the delimiters.
     pub inner: Span,
 }
 
-/// [`scan`] splits `src` into logical lines without allocating a rewritten copy,
-/// it pulls boneyards and notes aside as it goes.
+/// Splits `src` into logical lines without allocating a rewritten copy, pulling
+/// boneyards and notes aside as it goes.
 ///
-/// NOTE: Tabs are left as-is, later concern.
+/// Tabs are left as-is and expanding them is left to the caller.
 pub fn scan(src: &str) -> Scan {
     let mut lines = Vec::new();
     let mut boneyards = Vec::new();
@@ -106,7 +106,7 @@ pub fn scan(src: &str) -> Scan {
 
     let mut segments: Vec<Segment> = Vec::new();
 
-    let mut segement_text_start = 0;
+    let mut segment_text_start = 0;
 
     let mut pos = 0usize;
     loop {
@@ -123,32 +123,32 @@ pub fn scan(src: &str) -> Scan {
         match earliest {
             Some(open) if earliest == next_note => match note_close(src, open) {
                 Some(close) => {
-                    push_text(&mut segments, segement_text_start, open);
+                    push_text(&mut segments, segment_text_start, open);
                     let span = Span::from(open..close);
                     let inner = Span::from(open + 2..close - 2);
                     physical_line += newlines(&src[span]);
                     segments.push(Segment::Ignored(span));
                     notes.push(Note { span, inner });
                     collect_boneyards(src, inner, &mut boneyards);
-                    segement_text_start = close;
+                    segment_text_start = close;
                     pos = close;
                 }
                 // Not a note so the `[[` is literal, keep it in the pending text run.
                 None => pos = open + 2,
             },
             Some(open) if earliest == next_boneyard => {
-                push_text(&mut segments, segement_text_start, open);
+                push_text(&mut segments, segment_text_start, open);
                 let close = src[open + 2..].find("*/").map(|i| open + 2 + i);
                 let span = Span::from(open..close.map_or(src.len(), |c| c + 2));
                 let inner = Span::from(open + 2..close.unwrap_or(src.len()));
                 physical_line += newlines(&src[inner]);
                 segments.push(Segment::Ignored(span));
                 boneyards.push(Boneyard { span, inner });
-                segement_text_start = span.end;
+                segment_text_start = span.end;
                 pos = span.end;
             }
             Some(nl) => {
-                push_text(&mut segments, segement_text_start, nl);
+                push_text(&mut segments, segment_text_start, nl);
                 lines.push(LogicalLine {
                     start_line: line_start_line,
                     range: Span::from(line_start..nl),
@@ -157,20 +157,19 @@ pub fn scan(src: &str) -> Scan {
                 physical_line += 1;
                 line_start = nl + 1;
                 line_start_line = physical_line;
-                segement_text_start = nl + 1;
+                segment_text_start = nl + 1;
                 pos = nl + 1;
             }
             None => {
-                push_text(&mut segments, segement_text_start, src.len());
+                push_text(&mut segments, segment_text_start, src.len());
                 let line = LogicalLine {
                     start_line: line_start_line,
                     range: Span::from(line_start..src.len()),
                     segments,
                 };
-                // The final line is dropped when it has no visible text.
-                //
-                // Can happen because off:
-                // A trailing newline, a note-only tail, or empty input.
+                // Drop the final line when it has no visible text: 
+                // a trailing newline, a note- or boneyard-only tail,
+                // or empty input.
                 if !line.text(src).is_empty() {
                     lines.push(line);
                 }
