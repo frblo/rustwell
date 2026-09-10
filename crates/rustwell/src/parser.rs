@@ -1177,4 +1177,134 @@ no",
             })]
         );
     }
+
+    /// Tests that the [`Span`] line numbers the parser attaches to elements are
+    /// correct.
+    ///
+    /// Are tested seprately to not clutter the end-to-end tests.
+    ///
+    /// Line numbers are 1-indexed and refer to lines in the original source,
+    /// before boneyards and notes are stripped.
+    mod span_correctness {
+        use super::*;
+
+        fn element_spans(input: &str) -> Vec<(usize, usize)> {
+            parse(input)
+                .elements
+                .iter()
+                .map(|s| (s.start_line, s.end_line))
+                .collect()
+        }
+
+        /// The `(start_line, end_line)` of every element inside each dialogue in
+        /// the screenplay, in document order. Both halves of a dual dialogue are
+        /// listed separately, so the outer `Vec` has one entry per spoken block.
+        fn dialogue_element_spans(input: &str) -> Vec<Vec<(usize, usize)>> {
+            parse(input)
+                .elements
+                .iter()
+                .flat_map(|s| match &s.inner {
+                    Element::Dialogue(d) => vec![d],
+                    Element::DualDialogue(left, right) => vec![left, right],
+                    _ => vec![],
+                })
+                .map(|d| spans(&d.elements))
+                .collect()
+        }
+
+        fn title_page(input: &str) -> TitlePage {
+            parse(input).titlepage.expect("expected a title page")
+        }
+
+        fn spans<T>(values: &[Span<T>]) -> Vec<(usize, usize)> {
+            values.iter().map(|s| (s.start_line, s.end_line)).collect()
+        }
+
+        #[test]
+        fn single_line_action_spans_one_line() {
+            assert_eq!(element_spans("A single line of action."), [(1, 1)]);
+        }
+
+        #[test]
+        fn multi_line_action_spans_the_whole_block() {
+            let input = "First line of action.\nSecond line of action.\nThird line of action.";
+            assert_eq!(element_spans(input), [(1, 3)]);
+        }
+
+        #[test]
+        fn blank_lines_are_not_included_in_element_spans() {
+            let input = "INT. ROOM - DAY\n\nSome action here.\n\n===\n\nMore action.";
+            assert_eq!(element_spans(input), [(1, 1), (3, 3), (5, 5), (7, 7)]);
+        }
+
+        #[test]
+        fn elements_after_a_boneyard_keep_original_source_line_numbers() {
+            let input = "Action one.\n\n/* a\nmulti-line\nboneyard */\nAction two.";
+            assert_eq!(element_spans(input), [(1, 1), (6, 6)]);
+        }
+
+        #[test]
+        fn dialogue_spans_the_character_line_through_the_last_line() {
+            let input = "\nCHAR\n(sad)\nNooo!\n(angry)\nI am angry.";
+            assert_eq!(element_spans(input), [(2, 6)]);
+            assert_eq!(
+                dialogue_element_spans(input),
+                [vec![(3, 3), (4, 4), (5, 5), (6, 6)]]
+            );
+        }
+
+        #[test]
+        fn merged_dialogue_lines_span_all_their_source_lines() {
+            let input = "\nCHAR\nFirst line of dialogue.\nSecond line of dialogue.";
+            assert_eq!(element_spans(input), [(2, 4)]);
+            assert_eq!(dialogue_element_spans(input), [vec![(3, 4)]]);
+        }
+
+        #[test]
+        fn dual_dialogue_spans_both_halves() {
+            let input = "\nALICE\nHi there.\n\nBOB ^\nHello.";
+            assert_eq!(element_spans(input), [(2, 6)]);
+            assert_eq!(dialogue_element_spans(input), [vec![(3, 3)], vec![(6, 6)]]);
+        }
+
+        #[test]
+        fn single_line_title_page_values_span_their_line() {
+            let input = "Title: My Movie\nCredit: Written by\nAuthor: A. Writer\n\nAction.";
+            let tp = title_page(input);
+            assert_eq!(spans(&tp.title), [(1, 1)]);
+            assert_eq!(spans(&tp.credit), [(2, 2)]);
+            assert_eq!(spans(&tp.authors), [(3, 3)]);
+            assert_eq!(element_spans(input), [(5, 5)]);
+        }
+
+        #[test]
+        fn indented_title_page_block_values_span_their_own_lines() {
+            let input = "Title:\n   My Movie\n   The Sequel\n\nAction.";
+            let tp = title_page(input);
+            assert_eq!(spans(&tp.title), [(2, 2), (3, 3)]);
+            assert_eq!(element_spans(input), [(5, 5)]);
+        }
+
+        #[test]
+        fn element_spans_across_every_element_kind() {
+            let cases: &[(&str, &[(usize, usize)])] = &[
+                ("INT. ROOM - DAY", &[(1, 1)]),
+                (".FORCED HEADING", &[(1, 1)]),
+                ("Plain action.", &[(1, 1)]),
+                ("!INT. Forced action, not a heading.", &[(1, 1)]),
+                ("\nCUT TO:\n\nAfter the transition.", &[(2, 2), (4, 4)]),
+                ("\n> Forced transition to:\n\nAfter.", &[(2, 2), (4, 4)]),
+                ("> THE END <", &[(1, 1)]),
+                ("> centered one <\n> centered two <", &[(1, 2)]),
+                ("~A single sung line", &[(1, 1)]),
+                ("~verse one\n~verse two\n~verse three", &[(1, 3)]),
+                ("= A synopsis", &[(1, 1)]),
+                ("===", &[(1, 1)]),
+                ("# A section produces no element", &[]),
+            ];
+            for (input, expected) in cases {
+                assert_eq!(&element_spans(input), expected, "input: {input:?}");
+            }
+        }
+    }
 }
