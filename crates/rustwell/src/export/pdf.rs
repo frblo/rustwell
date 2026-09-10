@@ -580,7 +580,7 @@ fn write_dialogue(
             None => 0,
         };
 
-        let (content, margin) = match &dialogue.elements[dialogue_index] {
+        let (content, margin) = match &*dialogue.elements[dialogue_index] {
             DialogueElement::Parenthetical(s) => (s, &dialogue_margins.parenthetical),
             DialogueElement::Line(s) => (s, &dialogue_margins.line),
         };
