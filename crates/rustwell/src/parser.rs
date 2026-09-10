@@ -1,3 +1,5 @@
+mod scanner;
+
 use std::iter::Peekable;
 
 use crate::rich_string::RichString;
