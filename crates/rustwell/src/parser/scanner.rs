@@ -100,28 +100,16 @@ pub fn scan(src: &str) -> Scan {
     let mut notes = Vec::new();
 
     let mut physical_line = 1;
-
     let mut line_start = 0;
     let mut line_start_line = 1;
 
     let mut segments: Vec<Segment> = Vec::new();
-
     let mut segment_text_start = 0;
 
-    let mut pos = 0usize;
+    let mut pos = 0;
     loop {
-        let rest = &src[pos..];
-
-        let next_note = rest.find("[[").map(|i| pos + i);
-        let next_boneyard = rest.find("/*").map(|i| pos + i);
-        let next_newline = rest.find('\n').map(|i| pos + i);
-        let earliest = [next_note, next_boneyard, next_newline]
-            .into_iter()
-            .flatten()
-            .min();
-
-        match earliest {
-            Some(open) if earliest == next_note => match note_close(src, open) {
+        match find_marker(src, pos, NoteEdge::Open) {
+            Some(Marker::NoteEdge(open)) => match note_close(src, open) {
                 Some(close) => {
                     push_text(&mut segments, segment_text_start, open);
                     let span = Span::from(open..close);
@@ -136,7 +124,7 @@ pub fn scan(src: &str) -> Scan {
                 // Not a note so the `[[` is literal, keep it in the pending text run.
                 None => pos = open + 2,
             },
-            Some(open) if earliest == next_boneyard => {
+            Some(Marker::Boneyard(open)) => {
                 push_text(&mut segments, segment_text_start, open);
                 let close = src[open + 2..].find("*/").map(|i| open + 2 + i);
                 let span = Span::from(open..close.map_or(src.len(), |c| c + 2));
@@ -147,7 +135,7 @@ pub fn scan(src: &str) -> Scan {
                 segment_text_start = span.end;
                 pos = span.end;
             }
-            Some(nl) => {
+            Some(Marker::Newline(nl)) => {
                 push_text(&mut segments, segment_text_start, nl);
                 lines.push(LogicalLine {
                     start_line: line_start_line,
@@ -167,7 +155,7 @@ pub fn scan(src: &str) -> Scan {
                     range: Span::from(line_start..src.len()),
                     segments,
                 };
-                // Drop the final line when it has no visible text: 
+                // Drop the final line when it has no visible text:
                 // a trailing newline, a note- or boneyard-only tail,
                 // or empty input.
                 if !line.text(src).is_empty() {
@@ -200,26 +188,20 @@ fn note_close(src: &str, open: usize) -> Option<usize> {
     // The current line since that newline, with boneyard spans deleted: whether
     // it is all spaces, and how many bytes long. "" or " " breaks the note.
     let mut all_spaces = true;
-    let mut len = 0usize;
+    let mut len = 0;
 
     loop {
-        let rest = &src[i..];
-        let close = rest.find("]]").map(|k| i + k);
-        let boneyard = rest.find("/*").map(|k| i + k);
-        let newline = rest.find('\n').map(|k| i + k);
-        let first = [close, boneyard, newline].into_iter().flatten().min();
-
-        match first {
+        match find_marker(src, i, NoteEdge::Close) {
             None => return None,
-            Some(p) if first == close => return Some(p + 2),
+            Some(Marker::NoteEdge(p)) => return Some(p + 2),
             // Boneyard gets skipped here and collected later.
-            Some(p) if first == boneyard => {
+            Some(Marker::Boneyard(p)) => {
                 let visible = &src[Span::from(i..p)];
                 all_spaces &= visible.bytes().all(|b| b == b' ');
                 len += visible.len();
                 i = src[p + 2..].find("*/").map_or(src.len(), |k| p + 2 + k + 2);
             }
-            Some(p) => {
+            Some(Marker::Newline(p)) => {
                 let visible = &src[Span::from(i..p)];
                 all_spaces &= visible.bytes().all(|b| b == b' ');
                 len += visible.len();
@@ -233,6 +215,52 @@ fn note_close(src: &str, open: usize) -> Option<usize> {
             }
         }
     }
+}
+
+/// Which edge of a `[[ ]]` note [`find_marker`] is looking for.
+enum NoteEdge {
+    /// The opening `[[`.
+    Open,
+    /// The closing `]]`.
+    Close,
+}
+
+impl NoteEdge {
+    fn bytes(self) -> [u8; 2] {
+        match self {
+            NoteEdge::Open => [b'[', b'['],
+            NoteEdge::Close => [b']', b']'],
+        }
+    }
+}
+
+/// The earliest marker [`find_marker`] found.
+enum Marker {
+    /// The note edge passed to [`find_marker`].
+    NoteEdge(usize),
+    /// A `/*` boneyard opener.
+    Boneyard(usize),
+    /// A `\n`.
+    Newline(usize),
+}
+
+/// Scans `src[from..]` for the earliest of `edge` (an opening or
+/// closing note delimiter), a `/*` boneyard opener, or a newline.
+fn find_marker(src: &str, from: usize, edge: NoteEdge) -> Option<Marker> {
+    let delim = edge.bytes();
+    let bytes = src.as_bytes();
+    let mut i = from;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => return Some(Marker::Newline(i)),
+            b if b == delim[0] && bytes.get(i + 1) == Some(&delim[1]) => {
+                return Some(Marker::NoteEdge(i));
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => return Some(Marker::Boneyard(i)),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// The number of newlines in a &str.
