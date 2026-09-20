@@ -9,7 +9,7 @@ use crate::{
 pub struct Statistics {
     characters: HashMap<RichString, usize>,
     scenes: Vec<HashMap<usize, CharacterStats>>,
-    scene_names: Vec<RichString>,
+    pub scene_names: Vec<RichString>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -72,10 +72,6 @@ impl Statistics {
         self.characters.keys().collect()
     }
 
-    pub fn scenes(&self) -> &Vec<RichString> {
-        &self.scene_names
-    }
-
     pub fn character_stats_in_scene(
         &self,
         name: &RichString,
@@ -91,12 +87,15 @@ impl Statistics {
         }
     }
 
-    pub fn characters_stats_in_scene(&self, scene_idx: usize) -> HashMap<String, CharacterStats> {
+    pub fn characters_stats_in_scene(
+        &self,
+        scene_idx: usize,
+    ) -> HashMap<RichString, CharacterStats> {
         if let Some(scene) = self.scenes.get(scene_idx) {
             let mut map = HashMap::with_capacity(scene.len());
             for (name, character_idx) in &self.characters {
                 if let Some(stats) = scene.get(&character_idx) {
-                    map.insert(name.to_string(), *stats);
+                    map.insert(name.clone(), *stats);
                 }
             }
             map

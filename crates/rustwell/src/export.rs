@@ -8,6 +8,7 @@
 //! [`Exporter::export`] returns [`std::io::Result`] and is generally expected
 //! to only return Error when there is an issue with the writer.
 
+pub mod csv;
 pub mod html;
 pub mod pdf;
 

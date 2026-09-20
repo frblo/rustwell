@@ -19,3 +19,4 @@ target
 # Output files from Rustwell
 *.html
 *.pdf
+*.csv
