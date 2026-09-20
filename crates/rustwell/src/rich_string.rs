@@ -20,6 +20,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::{fmt::Display, str::Chars};
 
 use bitflags::bitflags;
@@ -52,7 +53,7 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// assert!(rs.elements[1].is_bold());
 /// ```
 #[must_use]
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RichString {
     pub elements: Vec<Element>,
 }
@@ -457,6 +458,14 @@ impl Display for RichString {
     }
 }
 
+impl Hash for RichString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for s in &self.elements {
+            s.text.hash(state);
+        }
+    }
+}
+
 impl<T> From<T> for RichString
 where
     T: AsRef<str>,
@@ -465,6 +474,12 @@ where
         let mut out = RichString::new();
         out.push_str(str);
         out
+    }
+}
+
+impl From<&RichString> for String {
+    fn from(rs: &RichString) -> Self {
+        rs.elements.iter().map(|s| s.text.clone()).collect()
     }
 }
 

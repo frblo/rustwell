@@ -37,10 +37,12 @@ mod parser;
 
 pub mod rich_string;
 pub mod screenplay;
+pub mod statistics;
 pub use screenplay::Screenplay;
 
 pub use export::Exporter;
 pub use export::ExporterExt;
+pub use export::csv::CsvExporter;
 pub use export::html::HtmlExporter;
 pub use export::pdf::A4;
 pub use export::pdf::LETTER;

@@ -1,6 +1,7 @@
 use clap::{Parser, ValueEnum};
 use color_eyre::Result;
 use color_eyre::eyre::bail;
+use rustwell::CsvExporter;
 use rustwell::Exporter;
 use rustwell::ExporterExt;
 use rustwell::HtmlExporter;
@@ -44,6 +45,7 @@ struct Cli {
 enum Target {
     Html,
     Pdf,
+    Csv,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -87,6 +89,7 @@ fn decide_exporter(cli: &Cli) -> Box<dyn Exporter> {
             paper_size: decide_paper_size(cli.papersize),
             ..Default::default()
         }),
+        Target::Csv => Box::new(CsvExporter {}),
     }
 }
 
@@ -118,6 +121,7 @@ fn detect_target_from_path(path: &str) -> Result<Target> {
     let t = match ext.as_str() {
         "html" | "htm" => Target::Html,
         "pdf" => Target::Pdf,
+        "csv" => Target::Csv,
         _ => bail!("unkown extension '.{}'; specify -t/--target", ext),
     };
 
