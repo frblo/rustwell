@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     Screenplay,
     rich_string::RichString,
-    screenplay::{Dialogue, Element},
+    screenplay::{Dialogue, DialogueElement, Element},
 };
 
 pub struct Statistics {
@@ -63,18 +63,16 @@ impl Statistics {
 
     pub fn total_character_stats(&self, name: &RichString) -> Option<CharacterStats> {
         if let Some(character_idx) = self.characters.get(name) {
-            let mut character_stats = CharacterStats {
-                lines_count: 0,
-                words_count: 0,
-            };
+            let mut character_stats = CharacterStats::default();
+
             for scene in self.scenes.iter() {
                 match scene.get(character_idx) {
                     Some(CharacterStats {
                         lines_count,
                         words_count,
                     }) => {
-                        character_stats.lines_count = *lines_count;
-                        character_stats.words_count = *words_count;
+                        character_stats.lines_count += *lines_count;
+                        character_stats.words_count += *words_count;
                     }
                     None => (),
                 };
@@ -97,12 +95,102 @@ fn handle_dialogue(
         None => {
             let i = characters.len();
             characters.insert(name.clone(), i);
-            scene.insert(i, CharacterStats::default());
-
             i
         }
     };
 
-    let stats = scene.get_mut(&character_idx).unwrap();
+    let stats = scene.entry(character_idx).or_default();
     stats.lines_count += 1;
+
+    for element in &dialogue.elements {
+        if let DialogueElement::Line(line) = &element.inner {
+            stats.words_count += count_words(line);
+        }
+    }
+}
+
+fn count_words(text: &RichString) -> usize {
+    let mut count = 0;
+    let mut in_word = false;
+    for c in text.iter() {
+        if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            in_word = true;
+            count += 1;
+        }
+    }
+    count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse;
+
+    #[test]
+    fn counts_words_said_by_a_character() {
+        let script = r#"
+INT. ROOM - DAY
+
+ALICE
+(tired)
+Hey, open up!
+(angry)
+I mean it!
+
+BOB
+Who's there?
+"#;
+
+        let stats = Statistics::new(&parse(script));
+
+        let alice = stats
+            .total_character_stats(&RichString::from("ALICE"))
+            .unwrap();
+
+        assert_eq!(alice.lines_count, 1);
+        assert_eq!(alice.words_count, 6);
+
+        let bob = stats
+            .total_character_stats(&RichString::from("BOB"))
+            .unwrap();
+        assert_eq!(bob.lines_count, 1);
+        assert_eq!(bob.words_count, 2);
+    }
+
+    #[test]
+    fn counts_words_across_scenes() {
+        let script = r#"
+INT. ROOM - DAY
+
+ALICE
+Hello world.
+
+INT. OTHER ROOM - DAY
+
+ALICE
+Hi there.
+
+BOB
+Goodbye.
+"#;
+
+        let stats = Statistics::new(&parse(script));
+
+        let alice = stats
+            .total_character_stats(&RichString::from("ALICE"))
+            .unwrap();
+        assert_eq!(alice.lines_count, 2);
+        assert_eq!(alice.words_count, 4);
+    }
+
+    #[test]
+    fn counts_words_split_across_styled_elements_as_one() {
+        let text: RichString = "foo**bar**".into();
+        assert_eq!(count_words(&text), 1);
+
+        let text: RichString = "This is *styled* text.".into();
+        assert_eq!(count_words(&text), 4);
+    }
 }
