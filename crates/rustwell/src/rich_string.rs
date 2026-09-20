@@ -460,8 +460,9 @@ impl Display for RichString {
 
 impl Hash for RichString {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let s: String = self.into();
-        s.hash(state);
+        for s in &self.elements {
+            s.text.hash(state);
+        }
     }
 }
 
