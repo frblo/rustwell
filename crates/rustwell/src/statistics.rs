@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     Screenplay,
     rich_string::RichString,
-    screenplay::{Dialogue, DialogueElement, Element},
+    screenplay::{Dialogue, DialogueElement, Element, Span},
 };
 
 /// Contains all tracked statistics for a [`Screenplay`].
@@ -17,7 +17,7 @@ pub struct Statistics {
 }
 
 /// Keeps track of statistics related to a character within some scope in a [`Screenplay`].
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CharacterStats {
     /// The number of lines (dialogues) a characters has.
     pub lines_count: usize,
@@ -28,11 +28,17 @@ pub struct CharacterStats {
 impl Statistics {
     /// Creates a new [`Statistics`] from a [`Screenplay`].
     ///
-    /// This function does `clone` some [`RichString`]s.
+    /// This function does clone some [`RichString`]s.
     pub fn new(screenplay: &Screenplay) -> Self {
         let mut characters = HashMap::new();
-        let mut scenes = vec![HashMap::new()];
-        let mut scene_names = Vec::new();
+        let (mut scenes, mut scene_names, mut zeroth_scene) = match screenplay.elements.first() {
+            Some(Span {
+                start_line: _,
+                end_line: _,
+                inner: Element::Heading { slug: _, number: _ },
+            }) => (Vec::new(), Vec::new(), false),
+            _ => (vec![HashMap::new()], vec!["".into()], true),
+        };
         let mut scene_idx = 0;
 
         for e in &screenplay.elements {
@@ -40,6 +46,13 @@ impl Statistics {
                 Element::Heading { slug, number: _ } => {
                     scenes.push(HashMap::new());
                     scene_names.push(slug.clone());
+
+                    // If there is content before the first scene heading
+                    if scene_idx == 0 && !zeroth_scene {
+                        zeroth_scene = true;
+                        continue;
+                    }
+
                     scene_idx += 1;
                 }
                 Element::Dialogue(dialogue) => handle_dialogue(
@@ -207,22 +220,18 @@ Who's there?
 
         let stats = Statistics::new(&parse(script));
 
-        let alice = stats
-            .total_character_stats(&RichString::from("ALICE"))
-            .unwrap();
+        let alice = stats.total_character_stats(&"ALICE".into()).unwrap();
 
         assert_eq!(alice.lines_count, 1);
         assert_eq!(alice.words_count, 6);
 
-        let bob = stats
-            .total_character_stats(&RichString::from("BOB"))
-            .unwrap();
+        let bob = stats.total_character_stats(&"BOB".into()).unwrap();
         assert_eq!(bob.lines_count, 1);
         assert_eq!(bob.words_count, 2);
     }
 
     #[test]
-    fn counts_words_across_scenes() {
+    fn counts_total_words_across_scenes() {
         let script = r#"
 INT. ROOM - DAY
 
@@ -240,11 +249,97 @@ Goodbye.
 
         let stats = Statistics::new(&parse(script));
 
-        let alice = stats
-            .total_character_stats(&RichString::from("ALICE"))
-            .unwrap();
+        let alice = stats.total_character_stats(&"ALICE".into()).unwrap();
         assert_eq!(alice.lines_count, 2);
         assert_eq!(alice.words_count, 4);
+    }
+
+    #[test]
+    fn counts_words_across_scenes() {
+        let script = r#"
+INT. ROOM - DAY
+
+ALICE
+Hello world.
+
+INT. OTHER ROOM - DAY
+
+ALICE
+Hi there.
+
+BOB
+Goodbye.
+
+ALICE
+(sad)
+Don't leave!
+"#;
+
+        let stats = Statistics::new(&parse(script));
+
+        assert_eq!(
+            stats.character_stats_in_scene(&"ALICE".into(), 0),
+            Some(CharacterStats {
+                lines_count: 1,
+                words_count: 2
+            })
+        );
+        assert_eq!(
+            stats.character_stats_in_scene(&"ALICE".into(), 1),
+            Some(CharacterStats {
+                lines_count: 2,
+                words_count: 4
+            })
+        );
+    }
+
+    #[test]
+    fn counts_words_with_zeroth_scene() {
+        let script = r#"
+ALICE
+Woah, dialogue before the first scene?!
+
+INT. ROOM - DAY
+
+ALICE
+Hello world.
+
+INT. OTHER ROOM - DAY
+
+ALICE
+Hi there.
+
+BOB
+Goodbye.
+
+ALICE
+(sad)
+Don't leave!
+"#;
+
+        let stats = Statistics::new(&parse(script));
+
+        assert_eq!(
+            stats.character_stats_in_scene(&"ALICE".into(), 0),
+            Some(CharacterStats {
+                lines_count: 1,
+                words_count: 6
+            })
+        );
+        assert_eq!(
+            stats.character_stats_in_scene(&"ALICE".into(), 1),
+            Some(CharacterStats {
+                lines_count: 1,
+                words_count: 2
+            })
+        );
+        assert_eq!(
+            stats.character_stats_in_scene(&"ALICE".into(), 2),
+            Some(CharacterStats {
+                lines_count: 2,
+                words_count: 4
+            })
+        );
     }
 
     #[test]
