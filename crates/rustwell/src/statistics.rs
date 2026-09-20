@@ -9,9 +9,10 @@ use crate::{
 pub struct Statistics {
     characters: HashMap<RichString, usize>,
     scenes: Vec<HashMap<usize, CharacterStats>>,
+    scene_names: Vec<RichString>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct CharacterStats {
     pub lines_count: usize,
     pub words_count: usize,
@@ -21,12 +22,14 @@ impl Statistics {
     pub fn new(screenplay: &Screenplay) -> Self {
         let mut characters = HashMap::new();
         let mut scenes = vec![HashMap::new()];
+        let mut scene_names = Vec::new();
         let mut scene_idx = 0;
 
         for e in &screenplay.elements {
             match &**e {
-                Element::Heading { slug: _, number: _ } => {
+                Element::Heading { slug, number: _ } => {
                     scenes.push(HashMap::new());
+                    scene_names.push(slug.clone());
                     scene_idx += 1;
                 }
                 Element::Dialogue(dialogue) => handle_dialogue(
@@ -50,7 +53,11 @@ impl Statistics {
             }
         }
 
-        Statistics { characters, scenes }
+        Statistics {
+            characters,
+            scenes,
+            scene_names,
+        }
     }
 
     pub fn scene_count(&self) -> usize {
@@ -59,6 +66,43 @@ impl Statistics {
 
     pub fn character_count(&self) -> usize {
         self.characters.len()
+    }
+
+    pub fn characters(&self) -> Vec<&RichString> {
+        self.characters.keys().collect()
+    }
+
+    pub fn scenes(&self) -> &Vec<RichString> {
+        &self.scene_names
+    }
+
+    pub fn character_stats_in_scene(
+        &self,
+        name: &RichString,
+        scene_idx: usize,
+    ) -> Option<CharacterStats> {
+        if let Some(character_idx) = self.characters.get(name)
+            && let Some(scene) = self.scenes.get(scene_idx)
+            && let Some(stats) = scene.get(character_idx)
+        {
+            Some(*stats)
+        } else {
+            None
+        }
+    }
+
+    pub fn characters_stats_in_scene(&self, scene_idx: usize) -> HashMap<String, CharacterStats> {
+        if let Some(scene) = self.scenes.get(scene_idx) {
+            let mut map = HashMap::with_capacity(scene.len());
+            for (name, character_idx) in &self.characters {
+                if let Some(stats) = scene.get(&character_idx) {
+                    map.insert(name.to_string(), *stats);
+                }
+            }
+            map
+        } else {
+            HashMap::new()
+        }
     }
 
     pub fn total_character_stats(&self, name: &RichString) -> Option<CharacterStats> {
