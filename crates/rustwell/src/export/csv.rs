@@ -4,7 +4,7 @@ use crate::{
     export::Exporter, rich_string::RichString, screenplay::Screenplay, statistics::Statistics,
 };
 
-/// A [`Screenplay`] exporter for `CSV`
+/// A [`Screenplay`] exporter for `CSV`, or rather a [`Statistics`] exporter.
 ///
 /// The variables configure the exporter
 #[derive(Default)]

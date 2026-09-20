@@ -6,19 +6,29 @@ use crate::{
     screenplay::{Dialogue, DialogueElement, Element},
 };
 
+/// Contains all tracked statistics for a [`Screenplay`].
 pub struct Statistics {
+    /// Keeps track of all characters present in the [`Screenplay`], with their assigned index.
     characters: HashMap<RichString, usize>,
+    /// A [`HashMap`] for each scene with related [`CharacterStats`].
     scenes: Vec<HashMap<usize, CharacterStats>>,
+    /// The names of scenes in the [`Screenplay`].
     pub scene_names: Vec<RichString>,
 }
 
+/// Keeps track of statistics related to a character within some scope in a [`Screenplay`].
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct CharacterStats {
+    /// The number of lines (dialogues) a characters has.
     pub lines_count: usize,
+    /// The number of words a characters says.
     pub words_count: usize,
 }
 
 impl Statistics {
+    /// Creates a new [`Statistics`] from a [`Screenplay`].
+    ///
+    /// This function does `clone` some [`RichString`]s.
     pub fn new(screenplay: &Screenplay) -> Self {
         let mut characters = HashMap::new();
         let mut scenes = vec![HashMap::new()];
@@ -60,18 +70,25 @@ impl Statistics {
         }
     }
 
+    /// The number of scenes in the [`Screenplay`].
     pub fn scene_count(&self) -> usize {
         self.scenes.len()
     }
 
+    /// The number of characters in the [`Screenplay`].
     pub fn character_count(&self) -> usize {
         self.characters.len()
     }
 
+    /// The names of all characters in the [`Screenplay`], in a stochastic order
     pub fn characters(&self) -> Vec<&RichString> {
         self.characters.keys().collect()
     }
 
+    /// Returns the [`CharacterStats`] of a certain character in a particular scene.
+    ///
+    /// Returns [`None`] if the character or the scene does not exist, or if the character is not
+    /// present in the scene.
     pub fn character_stats_in_scene(
         &self,
         name: &RichString,
@@ -87,6 +104,7 @@ impl Statistics {
         }
     }
 
+    /// Returns the [`CharacterStats`] of all characters present in a particular scene.
     pub fn characters_stats_in_scene(
         &self,
         scene_idx: usize,
@@ -104,6 +122,7 @@ impl Statistics {
         }
     }
 
+    /// Returns the global [`CharacterStats`] of a character in the entirety of the [`Screenplay`].
     pub fn total_character_stats(&self, name: &RichString) -> Option<CharacterStats> {
         if let Some(character_idx) = self.characters.get(name) {
             let mut character_stats = CharacterStats::default();
@@ -229,7 +248,7 @@ Goodbye.
     }
 
     #[test]
-    fn counts_words_split_across_styled_elements_as_one() {
+    fn counts_words_split_across_styled_elements() {
         let text: RichString = "foo**bar**".into();
         assert_eq!(count_words(&text), 1);
 
