@@ -50,6 +50,49 @@ pub fn parse(src: &str) -> Screenplay {
     }
 }
 
+/// The text of a forced heading (`.HEADING`), if `trimmed` is one.
+///
+/// A lone `.` followed by something non-alphanumeric (like `...`) is not forced.
+fn forced_heading_text(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix('.')?;
+    rest.chars().next()?.is_alphanumeric().then_some(rest)
+}
+
+/// If `trimmed` begins with a scene heading prefix (`INT.`, `EXT `, `I/E.` and so on).
+fn starts_like_heading(trimmed: &str) -> bool {
+    const PREFIXES: [&str; 6] = ["INT", "EXT", "EST", "I/E", "INT./EXT", "INT/EXT"];
+    let bytes = trimmed.as_bytes();
+
+    PREFIXES.iter().any(|prefix| {
+        let n = prefix.len();
+        bytes
+            .get(..n)
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+            && bytes.get(n).is_some_and(|&end| end == b' ' || end == b'.')
+    })
+}
+
+/// Splits a trailing scene number (`#S.1#`) off the heading text.
+fn split_heading_number(text: &str) -> (&str, Option<String>) {
+    if let Some(start) = text.trim_end().strip_suffix('#')
+        && let Some((text, number)) = start.rsplit_once('#')
+        && number
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
+    {
+        return (text.trim_end(), Some(number.to_string()));
+    }
+
+    (text, None)
+}
+
+/// If `trimmed` looks like a character cue: all caps outside of any extension,
+/// with at least one letter.
+fn looks_like_character(trimmed: &str) -> bool {
+    let head = trimmed.split_once('(').map_or(trimmed, |(head, _)| head);
+    head.chars().any(char::is_alphabetic) && !head.chars().any(char::is_lowercase)
+}
+
 /// Expands tabs to four spaces, borrowing when there are none.
 fn expand_tabs(text: Cow<'_, str>) -> Cow<'_, str> {
     if text.contains('\t') {
@@ -58,6 +101,51 @@ fn expand_tabs(text: Cow<'_, str>) -> Cow<'_, str> {
         text
     }
 }
+
+/// A line of the source as the parser rules see it.
+struct LineView<'t> {
+    /// The text of the line, with boneyards and notes removed and tabs expanded.
+    raw: &'t str,
+    /// `raw` with surrounding whitespace removed.
+    trimmed: &'t str,
+    /// The byte range of the line in the source.
+    range: SourceRange,
+}
+
+/// A parser rule. Returns `true` if it claimed the line, having added it to
+/// the screenplay, and `false` to leave the line to the next rule.
+type Rule = for<'a, 'v> fn(&mut Parser<'a>, &LineView<'v>) -> bool;
+
+/// Builds a `&[Rule]` from the names of [`Parser`] methods.
+macro_rules! rules {
+    ($($rule:ident),+ $(,)?) => {
+        &[$(|parser, line| parser.$rule(line)),+]
+    };
+}
+
+/// The defaults rules for a line in priority order: the first rule to claim
+/// a line wins.
+const DEFAULT_RULES: &[Rule] = rules![
+    section,
+    // `===` is a page break and `=` a synopsis, so page breaks go first.
+    page_break,
+    synopsis,
+    // `!` forces action, so it must beat everything that would otherwise match.
+    forced_action,
+    centered,
+    lyrics,
+    // A forced heading (`.`) or an INT/EXT prefix.
+    heading,
+    // `>` forces a transition, but `> text <` is centered, which comes first.
+    transition,
+    // All caps with something following, so after the more specific rules.
+    dialogue_start,
+    // Anything not claimed above, so this must stay last.
+    action,
+];
+
+/// The rules for a line directly after centered text, lyrics or action.
+const IN_BLOCK_RULES: &[Rule] = rules![centered, lyrics, action];
 
 /// Internal parser state machine for Fountain.
 ///
@@ -88,47 +176,35 @@ impl<'a> Parser<'a> {
     /// Starts by parsing a potential title. Before moving on to the main loop.
     /// A line with two or more spaces is always treated as intentional empty lines.
     ///
-    /// Might seem like trimming is used a lot. The intention is that the
-    /// try functions work without having trimmed. Cost is extremely low when
-    /// calling trim on a already trimmed [&str].
+    /// Each line is trimmed once, into a [`LineView`] that the rules read.
     fn parse(mut self) -> (Option<TitlePage>, Vec<Span<Element>>) {
         self.parse_title();
         while let Some(logical) = self.lines.next() {
             let range = logical.range;
             let line = self.text(logical);
-            let line = &*line;
-            let trimmed = line.trim();
+            let view = LineView {
+                raw: &line,
+                trimmed: line.trim(),
+                range,
+            };
 
-            if trimmed.is_empty() && !line.starts_with("  ") {
+            if view.trimmed.is_empty() && !view.raw.starts_with("  ") {
                 self.state = State::Default;
                 continue;
             }
 
             match self.state {
-                State::Default => {
-                    // The first one returning true will break
-                    if self.try_section(trimmed)
-                        || self.try_page_break(trimmed, range)
-                        || self.try_synopsis(trimmed, range)
-                        || self.try_forced_action(trimmed, range)
-                        || self.try_centered(trimmed, range)
-                        || self.try_lyrics(trimmed, range)
-                        || self.try_heading(trimmed, range)
-                        || self.try_transition(trimmed, range)
-                        || self.try_dialogue_start(trimmed, range)
-                        || self.try_action(line, range)
-                    {}
-                }
+                State::Default => self.apply_rules(DEFAULT_RULES, &view),
                 State::InDialogue => {
                     let (curr_dialogue, element_span) = self
                         .get_last_dialogue()
                         .expect("Must exist since we are in dialogue block");
-                    element_span.end = range.end;
+                    element_span.end = view.range.end;
 
-                    if trimmed.starts_with('(') && trimmed.ends_with(')') {
+                    if view.trimmed.starts_with('(') && view.trimmed.ends_with(')') {
                         curr_dialogue.elements.push(Span::new(
-                            DialogueElement::Parenthetical(RichString::from(trimmed)),
-                            range,
+                            DialogueElement::Parenthetical(RichString::from(view.trimmed)),
+                            view.range,
                         ));
                         continue;
                     }
@@ -139,21 +215,16 @@ impl<'a> Parser<'a> {
                     }) = curr_dialogue.elements.last_mut()
                     {
                         rs.push_str("\n");
-                        rs.push_str(trimmed);
-                        span.end = range.end;
+                        rs.push_str(view.trimmed);
+                        span.end = view.range.end;
                     } else {
                         curr_dialogue.elements.push(Span::new(
-                            DialogueElement::Line(RichString::from(trimmed)),
-                            range,
+                            DialogueElement::Line(RichString::from(view.trimmed)),
+                            view.range,
                         ));
                     }
                 }
-                State::InBlock => {
-                    if self.try_centered(trimmed, range)
-                        || self.try_lyrics(trimmed, range)
-                        || self.try_action(line, range)
-                    {}
-                }
+                State::InBlock => self.apply_rules(IN_BLOCK_RULES, &view),
             }
         }
 
@@ -166,204 +237,164 @@ impl<'a> Parser<'a> {
         expand_tabs(line.text(self.src))
     }
 
-    /// `try_` is a helper function taking a predicate and a handle function
-    /// and is used to define different parts of the state machine.
-    fn try_<'s, P, H>(&mut self, line: &'s str, predicate: P, handle: H) -> bool
-    where
-        P: FnOnce(&mut Self, &'s str) -> Option<&'s str>,
-        H: FnOnce(&mut Self, &'s str),
-    {
-        let Some(new_line) = predicate(self, line) else {
+    /// Runs `rules` in order on `line`, stopping at the first that claims it.
+    fn apply_rules(&mut self, rules: &[Rule], line: &LineView) {
+        for rule in rules {
+            if rule(self, line) {
+                return;
+            }
+        }
+    }
+
+    /// Recognizes a section (`#`). Sections do not produce an element yet.
+    fn section(&mut self, line: &LineView) -> bool {
+        line.trimmed.starts_with('#')
+    }
+
+    fn synopsis(&mut self, line: &LineView) -> bool {
+        let Some(inner) = line.trimmed.strip_prefix('=') else {
             return false;
         };
 
-        handle(self, new_line);
+        if self.state == State::InBlock
+            && let Some(Span {
+                span,
+                inner: Element::Synopsis(rs),
+            }) = self.elements.last_mut()
+        {
+            rs.push_str("\n");
+            rs.push_str(inner);
+            span.end = line.range.end;
+            return true;
+        }
+
+        self.elements.push(Span::new(
+            Element::Synopsis(RichString::from(inner)),
+            line.range,
+        ));
+        self.state = State::InBlock;
         true
     }
 
-    fn try_section(&mut self, line: &str) -> bool {
-        self.try_(
-            line,
-            |_, s| s.trim_start().starts_with('#').then_some(s),
-            |_, _| {},
-        )
+    fn page_break(&mut self, line: &LineView) -> bool {
+        if !line.trimmed.starts_with("===") {
+            return false;
+        }
+
+        self.elements
+            .push(Span::new(Element::PageBreak, line.range));
+        true
     }
 
-    fn try_synopsis(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |_, s| s.trim_start().strip_prefix('='),
-            |this, inner| {
-                if this.state == State::InBlock
-                    && let Some(Span {
-                        span,
-                        inner: Element::Synopsis(rs),
-                    }) = this.elements.last_mut()
-                {
-                    rs.push_str("\n");
-                    rs.push_str(inner);
-                    span.end = range.end;
-                    return;
-                }
+    fn forced_action(&mut self, line: &LineView) -> bool {
+        let Some(inner) = line.trimmed.strip_prefix('!') else {
+            return false;
+        };
 
-                let rs = RichString::from(inner);
-                this.elements.push(Span::new(Element::Synopsis(rs), range));
-
-                this.state = State::InBlock;
-            },
-        )
+        self.elements.push(Span::new(
+            Element::Action(RichString::from(inner)),
+            line.range,
+        ));
+        self.state = State::InBlock;
+        true
     }
 
-    fn try_page_break(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |_, s| s.trim_start().starts_with("===").then_some(s),
-            |this, _| this.elements.push(Span::new(Element::PageBreak, range)),
-        )
+    fn centered(&mut self, line: &LineView) -> bool {
+        let Some(inner) = line
+            .trimmed
+            .strip_prefix('>')
+            .and_then(|u| u.strip_suffix('<'))
+        else {
+            return false;
+        };
+        let inner = inner.trim();
+
+        if self.state == State::InBlock
+            && let Some(Span {
+                span,
+                inner: Element::CenteredText(rs),
+            }) = self.elements.last_mut()
+        {
+            rs.push_str("\n");
+            rs.push_str(inner);
+            span.end = line.range.end;
+            return true;
+        }
+
+        self.elements.push(Span::new(
+            Element::CenteredText(RichString::from(inner)),
+            line.range,
+        ));
+        self.state = State::InBlock;
+        true
     }
 
-    fn try_forced_action(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |_, s| s.trim_start().strip_prefix('!'),
-            |this, inner| {
-                this.elements
-                    .push(Span::new(Element::Action(RichString::from(inner)), range));
-                this.state = State::InBlock;
-            },
-        )
+    fn lyrics(&mut self, line: &LineView) -> bool {
+        let Some(inner) = line.trimmed.strip_prefix('~') else {
+            return false;
+        };
+
+        if self.state == State::InBlock
+            && let Some(Span {
+                span,
+                inner: Element::Lyrics(rs),
+            }) = self.elements.last_mut()
+        {
+            rs.push_str("\n");
+            rs.push_str(inner);
+            span.end = line.range.end;
+            return true;
+        }
+
+        self.elements.push(Span::new(
+            Element::Lyrics(RichString::from(inner)),
+            line.range,
+        ));
+        self.state = State::InBlock;
+        true
     }
 
-    fn try_centered(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |_, s| s.trim().strip_prefix('>').and_then(|u| u.strip_suffix('<')),
-            |this, inner| {
-                let inner = inner.trim();
-                if this.state == State::InBlock
-                    && let Some(Span {
-                        span,
-                        inner: Element::CenteredText(rs),
-                    }) = this.elements.last_mut()
-                {
-                    rs.push_str("\n");
-                    rs.push_str(inner);
-                    span.end = range.end;
-                    return;
-                }
+    fn action(&mut self, line: &LineView) -> bool {
+        if self.state == State::InBlock
+            && let Some(Span {
+                span,
+                inner: Element::Action(rs),
+            }) = self.elements.last_mut()
+        {
+            rs.push_str("\n");
+            rs.push_str(line.raw);
+            span.end = line.range.end;
+            return true;
+        }
 
-                let rs = RichString::from(inner);
-                this.elements
-                    .push(Span::new(Element::CenteredText(rs), range));
-
-                this.state = State::InBlock;
-            },
-        )
+        self.elements.push(Span::new(
+            Element::Action(RichString::from(line.raw)),
+            line.range,
+        ));
+        self.state = State::InBlock;
+        true
     }
 
-    fn try_lyrics(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |_, s| s.trim_start().strip_prefix('~'),
-            |this, inner| {
-                if this.state == State::InBlock
-                    && let Some(Span {
-                        span,
-                        inner: Element::Lyrics(rs),
-                    }) = this.elements.last_mut()
-                {
-                    rs.push_str("\n");
-                    rs.push_str(inner);
-                    span.end = range.end;
-                    return;
-                }
+    fn heading(&mut self, line: &LineView) -> bool {
+        let text = if let Some(forced) = forced_heading_text(line.trimmed) {
+            forced
+        } else if starts_like_heading(line.trimmed) && self.next_line_is_empty() {
+            line.trimmed
+        } else {
+            return false;
+        };
 
-                let rs = RichString::from(inner);
-                this.elements.push(Span::new(Element::Lyrics(rs), range));
-
-                this.state = State::InBlock;
+        let (text, number) = split_heading_number(text);
+        self.elements.push(Span::new(
+            Element::Heading {
+                slug: RichString::from(text),
+                number,
             },
-        )
-    }
+            line.range,
+        ));
 
-    fn try_action(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |_, line| Some(line),
-            |this, inner| {
-                if this.state == State::InBlock
-                    && let Some(Span {
-                        span,
-                        inner: Element::Action(rs),
-                    }) = this.elements.last_mut()
-                {
-                    rs.push_str("\n");
-                    rs.push_str(inner);
-                    span.end = range.end;
-                    return;
-                }
-
-                let rs = RichString::from(inner);
-                this.elements.push(Span::new(Element::Action(rs), range));
-
-                this.state = State::InBlock;
-            },
-        )
-    }
-
-    fn try_heading(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |this, line| {
-                let trimmed = line.trim_start();
-                let mut it = trimmed.chars();
-                if matches!(
-                    (it.next(), it.next()),
-                    (Some('.'), Some(c)) if c.is_alphanumeric()
-                ) {
-                    return Some(
-                        trimmed
-                            .strip_prefix('.')
-                            .expect("Already checked that it exists"),
-                    );
-                }
-
-                let pats = ["INT", "EXT", "EST", "I/E", "INT./EXT", "INT/EXT"];
-                let bytes = trimmed.as_bytes();
-
-                (pats.iter().any(|p| {
-                    let n = p.len();
-                    bytes
-                        .get(..n)
-                        .is_some_and(|head| head.eq_ignore_ascii_case(p.as_bytes()))
-                        && bytes.get(n).is_some_and(|&end| end == b' ' || end == b'.')
-                }) && this.next_line_is_empty())
-                .then_some(trimmed)
-            },
-            |this, inner| {
-                let mut number = None;
-                let mut inner = inner;
-                if let Some(start) = inner.trim_end().strip_suffix('#')
-                    && let Some((new_inner, numbering)) = start.rsplit_once('#')
-                    && numbering
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
-                {
-                    number = Some(numbering.to_string());
-                    inner = new_inner.trim_end();
-                }
-
-                this.elements.push(Span::new(
-                    Element::Heading {
-                        slug: RichString::from(inner),
-                        number,
-                    },
-                    range,
-                ));
-
-                this.lines.next();
-            },
-        )
+        self.lines.next();
+        true
     }
 
     fn get_last_dialogue(&mut self) -> Option<(&mut Dialogue, &mut SourceRange)> {
@@ -395,7 +426,7 @@ impl<'a> Parser<'a> {
                 Element::DualDialogue(d, new_dialogue),
                 SourceRange::from(span.start..range.end),
             ));
-            return stripped;
+            return stripped.trim_end();
         }
 
         self.elements
@@ -403,66 +434,55 @@ impl<'a> Parser<'a> {
         inner
     }
 
-    fn try_dialogue_start(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |this, line| {
-                let trimmed = line.trim_start();
-                if let Some(inner) = trimmed.strip_prefix('@') {
-                    return Some(inner);
-                }
+    fn dialogue_start(&mut self, line: &LineView) -> bool {
+        let character = if let Some(forced) = line.trimmed.strip_prefix('@') {
+            forced
+        } else if looks_like_character(line.trimmed) && !self.next_line_is_empty() {
+            line.trimmed
+        } else {
+            return false;
+        };
 
-                let head = trimmed.split_once('(').map_or(trimmed, |(h, _)| h);
-                let has_alpha = head.chars().any(char::is_alphabetic);
-                let has_lower = head.chars().any(char::is_lowercase);
-                (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
-            },
-            |this, inner| {
-                let mut inner = this.insert_empty_dialogue(inner, range);
+        let mut character = self.insert_empty_dialogue(character, line.range);
 
-                let (curr_dialogue, _) = this
-                    .get_last_dialogue()
-                    .expect("Just pushed to list, must exist");
+        let (curr_dialogue, _) = self
+            .get_last_dialogue()
+            .expect("Just pushed to list, must exist");
 
-                if let Some((head, tail)) = inner.split_once('(')
-                    && let Some((extension, _)) = tail.split_once(')')
-                {
-                    curr_dialogue.extension = Some(RichString::from(extension));
-                    inner = head.trim_end();
-                }
+        if let Some((head, tail)) = character.split_once('(')
+            && let Some((extension, _)) = tail.split_once(')')
+        {
+            curr_dialogue.extension = Some(RichString::from(extension));
+            character = head.trim_end();
+        }
 
-                curr_dialogue.character = RichString::from(inner);
+        curr_dialogue.character = RichString::from(character);
 
-                this.state = State::InDialogue;
-            },
-        )
+        self.state = State::InDialogue;
+        true
     }
 
-    fn try_transition(&mut self, line: &str, range: SourceRange) -> bool {
-        self.try_(
-            line,
-            |this, line| {
-                if let Some(inner) = line.trim_start().strip_prefix('>')
-                    && !line.trim_end().ends_with('<')
-                {
-                    return Some(inner);
-                }
+    fn transition(&mut self, line: &LineView) -> bool {
+        let text = if let Some(forced) = line.trimmed.strip_prefix('>')
+            && !line.trimmed.ends_with('<')
+        {
+            forced
+        } else if line.trimmed.ends_with("TO:")
+            && !line.trimmed.chars().any(char::is_lowercase)
+            && self.next_line_is_empty()
+        {
+            line.trimmed
+        } else {
+            return false;
+        };
 
-                let transition_ending = line.ends_with("TO:");
-                let has_lower = line.chars().any(char::is_lowercase);
-                let transition_elem = transition_ending && !has_lower;
+        self.elements.push(Span::new(
+            Element::Transition(RichString::from(text)),
+            line.range,
+        ));
 
-                (transition_elem && this.next_line_is_empty()).then_some(line)
-            },
-            |this, inner| {
-                this.elements.push(Span::new(
-                    Element::Transition(RichString::from(inner)),
-                    range,
-                ));
-
-                this.lines.next();
-            },
-        )
+        self.lines.next();
+        true
     }
 
     fn parse_title(&mut self) {
