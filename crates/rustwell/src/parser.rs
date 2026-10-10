@@ -1,5 +1,6 @@
 mod scanner;
 
+use std::borrow::Cow;
 use std::iter::Peekable;
 
 use crate::rich_string::RichString;
@@ -7,8 +8,11 @@ use crate::screenplay::Dialogue;
 use crate::screenplay::DialogueElement;
 use crate::screenplay::Element;
 use crate::screenplay::Screenplay;
+use crate::screenplay::SourceRange;
 use crate::screenplay::Span;
 use crate::screenplay::TitlePage;
+use scanner::LogicalLine;
+use scanner::Scan;
 
 /// Parses a Fountain source string into a [`Screenplay`] structure.
 ///
@@ -32,17 +36,27 @@ use crate::screenplay::TitlePage;
 /// ```
 #[must_use]
 pub fn parse(src: &str) -> Screenplay {
-    Parser::new(&preprocess(src)).parse()
+    let Scan {
+        lines,
+        notes,
+        boneyards,
+    } = scanner::scan(src);
+    let (titlepage, elements) = Parser::new(src, &lines).parse();
+    Screenplay {
+        titlepage,
+        elements,
+        notes,
+        boneyards,
+    }
 }
 
-/// Splits `src` into `(physical line number, text)` lines for the [`Parser`],
-/// with boneyards and notes removed and tabs expanded to four spaces.
-fn preprocess(src: &str) -> Vec<Line> {
-    scanner::scan(src)
-        .lines
-        .iter()
-        .map(|line| (line.start_line, line.text(src).replace('\t', "    ")))
-        .collect()
+/// Expands tabs to four spaces, borrowing when there are none.
+fn expand_tabs(text: Cow<'_, str>) -> Cow<'_, str> {
+    if text.contains('\t') {
+        Cow::Owned(text.replace('\t', "    "))
+    } else {
+        text
+    }
 }
 
 /// Internal parser state machine for Fountain.
@@ -50,7 +64,8 @@ fn preprocess(src: &str) -> Vec<Line> {
 /// Keeps an iterator of the source, a accumulative list of [`Element`]s, and
 /// a state. Also tracks a [`TitlePage`] if such exists in the source.
 struct Parser<'a> {
-    lines: Peekable<std::slice::Iter<'a, Line>>,
+    src: &'a str,
+    lines: Peekable<std::slice::Iter<'a, LogicalLine>>,
     state: State,
     elements: Vec<Span<Element>>,
     title_page: Option<TitlePage>,
@@ -58,11 +73,10 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     /// Create new parser
-    ///
-    /// Expects `src` to have been preprocessed.
-    fn new(src: &'a [Line]) -> Self {
+    fn new(src: &'a str, lines: &'a [LogicalLine]) -> Self {
         Self {
-            lines: src.iter().peekable(),
+            src,
+            lines: lines.iter().peekable(),
             state: State::Default,
             elements: Vec::new(),
             title_page: None,
@@ -77,10 +91,12 @@ impl<'a> Parser<'a> {
     /// Might seem like trimming is used a lot. The intention is that the
     /// try functions work without having trimmed. Cost is extremely low when
     /// calling trim on a already trimmed [&str].
-    fn parse(mut self) -> Screenplay {
+    fn parse(mut self) -> (Option<TitlePage>, Vec<Span<Element>>) {
         self.parse_title();
-        while let Some((i, line)) = self.lines.next() {
-            let i = *i;
+        while let Some(logical) = self.lines.next() {
+            let range = logical.range;
+            let line = self.text(logical);
+            let line = &*line;
             let trimmed = line.trim();
 
             if trimmed.is_empty() && !line.starts_with("  ") {
@@ -92,57 +108,62 @@ impl<'a> Parser<'a> {
                 State::Default => {
                     // The first one returning true will break
                     if self.try_section(trimmed)
-                        || self.try_page_break(trimmed, i)
-                        || self.try_synopsis(trimmed, i)
-                        || self.try_forced_action(trimmed, i)
-                        || self.try_centered(trimmed, i)
-                        || self.try_lyrics(trimmed, i)
-                        || self.try_heading(trimmed, i)
-                        || self.try_transition(trimmed, i)
-                        || self.try_dialogue_start(trimmed, i)
-                        || self.try_action(line, i)
+                        || self.try_page_break(trimmed, range)
+                        || self.try_synopsis(trimmed, range)
+                        || self.try_forced_action(trimmed, range)
+                        || self.try_centered(trimmed, range)
+                        || self.try_lyrics(trimmed, range)
+                        || self.try_heading(trimmed, range)
+                        || self.try_transition(trimmed, range)
+                        || self.try_dialogue_start(trimmed, range)
+                        || self.try_action(line, range)
                     {}
                 }
                 State::InDialogue => {
-                    let (curr_dialogue, end_line) = self
+                    let (curr_dialogue, element_span) = self
                         .get_last_dialogue()
                         .expect("Must exist since we are in dialogue block");
-                    *end_line = i;
+                    element_span.end = range.end;
 
                     if trimmed.starts_with('(') && trimmed.ends_with(')') {
                         curr_dialogue.elements.push(Span::new(
                             DialogueElement::Parenthetical(RichString::from(trimmed)),
-                            i,
+                            range,
                         ));
                         continue;
                     }
 
                     if let Some(Span {
                         inner: DialogueElement::Line(rs),
-                        start_line: _,
-                        end_line,
+                        span,
                     }) = curr_dialogue.elements.last_mut()
                     {
                         rs.push_str("\n");
                         rs.push_str(trimmed);
-                        *end_line = i;
+                        span.end = range.end;
                     } else {
                         curr_dialogue.elements.push(Span::new(
                             DialogueElement::Line(RichString::from(trimmed)),
-                            i,
+                            range,
                         ));
                     }
                 }
                 State::InBlock => {
-                    if self.try_centered(trimmed, i)
-                        || self.try_lyrics(trimmed, i)
-                        || self.try_action(line, i)
+                    if self.try_centered(trimmed, range)
+                        || self.try_lyrics(trimmed, range)
+                        || self.try_action(line, range)
                     {}
                 }
             }
         }
 
-        Screenplay::new(self.title_page, self.elements)
+        (self.title_page, self.elements)
+    }
+
+    /// The text of `line` as the parser sees it: boneyards and notes removed and
+    /// tabs expanded.
+    fn text(&self, line: &'a LogicalLine) -> Cow<'a, str> {
+        expand_tabs(line.text(self.src))
     }
 
     /// `try_` is a helper function taking a predicate and a handle function
@@ -168,56 +189,52 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn try_synopsis(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_synopsis(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('='),
             |this, inner| {
                 if this.state == State::InBlock
                     && let Some(Span {
-                        start_line: _,
-                        end_line,
+                        span,
                         inner: Element::Synopsis(rs),
                     }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
-                    *end_line = line_idx;
+                    span.end = range.end;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements
-                    .push(Span::new(Element::Synopsis(rs), line_idx));
+                this.elements.push(Span::new(Element::Synopsis(rs), range));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_page_break(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_page_break(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().starts_with("===").then_some(s),
-            |this, _| this.elements.push(Span::new(Element::PageBreak, line_idx)),
+            |this, _| this.elements.push(Span::new(Element::PageBreak, range)),
         )
     }
 
-    fn try_forced_action(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_forced_action(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('!'),
             |this, inner| {
-                this.elements.push(Span::new(
-                    Element::Action(RichString::from(inner)),
-                    line_idx,
-                ));
+                this.elements
+                    .push(Span::new(Element::Action(RichString::from(inner)), range));
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_centered(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_centered(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |_, s| s.trim().strip_prefix('>').and_then(|u| u.strip_suffix('<')),
@@ -225,79 +242,76 @@ impl<'a> Parser<'a> {
                 let inner = inner.trim();
                 if this.state == State::InBlock
                     && let Some(Span {
-                        start_line: _,
-                        end_line,
+                        span,
                         inner: Element::CenteredText(rs),
                     }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
-                    *end_line = line_idx;
+                    span.end = range.end;
                     return;
                 }
 
                 let rs = RichString::from(inner);
                 this.elements
-                    .push(Span::new(Element::CenteredText(rs), line_idx));
+                    .push(Span::new(Element::CenteredText(rs), range));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_lyrics(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_lyrics(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |_, s| s.trim_start().strip_prefix('~'),
             |this, inner| {
                 if this.state == State::InBlock
                     && let Some(Span {
-                        start_line: _,
-                        end_line,
+                        span,
                         inner: Element::Lyrics(rs),
                     }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
-                    *end_line = line_idx;
+                    span.end = range.end;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Span::new(Element::Lyrics(rs), line_idx));
+                this.elements.push(Span::new(Element::Lyrics(rs), range));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_action(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_action(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |_, line| Some(line),
             |this, inner| {
                 if this.state == State::InBlock
                     && let Some(Span {
-                        start_line: _,
-                        end_line,
+                        span,
                         inner: Element::Action(rs),
                     }) = this.elements.last_mut()
                 {
                     rs.push_str("\n");
                     rs.push_str(inner);
-                    *end_line = line_idx;
+                    span.end = range.end;
                     return;
                 }
 
                 let rs = RichString::from(inner);
-                this.elements.push(Span::new(Element::Action(rs), line_idx));
+                this.elements.push(Span::new(Element::Action(rs), range));
 
                 this.state = State::InBlock;
             },
         )
     }
 
-    fn try_heading(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_heading(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -344,7 +358,7 @@ impl<'a> Parser<'a> {
                         slug: RichString::from(inner),
                         number,
                     },
-                    line_idx,
+                    range,
                 ));
 
                 this.lines.next();
@@ -352,47 +366,44 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn get_last_dialogue(&mut self) -> Option<(&mut Dialogue, &mut usize)> {
+    fn get_last_dialogue(&mut self) -> Option<(&mut Dialogue, &mut SourceRange)> {
         let Some(Span {
-            start_line: _,
-            end_line,
+            span,
             inner: Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue),
         }) = self.elements.last_mut()
         else {
             return None;
         };
 
-        Some((curr_dialogue, end_line))
+        Some((curr_dialogue, span))
     }
 
-    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str, line_idx: usize) -> &'s str {
+    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str, range: SourceRange) -> &'s str {
         let new_dialogue = Dialogue::new();
 
         if let Some(stripped) = inner.trim_end().strip_suffix('^')
             && let Some(&Span {
-                start_line: _,
-                end_line: _,
                 inner: Element::Dialogue(_),
+                ..
             }) = self.elements.last()
             && let Some(Span {
-                start_line,
-                end_line: _,
+                span,
                 inner: Element::Dialogue(d),
             }) = self.elements.pop()
         {
             self.elements.push(Span::new(
                 Element::DualDialogue(d, new_dialogue),
-                start_line,
+                SourceRange::from(span.start..range.end),
             ));
             return stripped;
         }
 
         self.elements
-            .push(Span::new(Element::Dialogue(new_dialogue), line_idx));
+            .push(Span::new(Element::Dialogue(new_dialogue), range));
         inner
     }
 
-    fn try_dialogue_start(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_dialogue_start(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -407,9 +418,9 @@ impl<'a> Parser<'a> {
                 (has_alpha && !has_lower && !this.next_line_is_empty()).then_some(trimmed)
             },
             |this, inner| {
-                let mut inner = this.insert_empty_dialogue(inner, line_idx);
+                let mut inner = this.insert_empty_dialogue(inner, range);
 
-                let (curr_dialogue, end_line) = this
+                let (curr_dialogue, _) = this
                     .get_last_dialogue()
                     .expect("Just pushed to list, must exist");
 
@@ -421,14 +432,13 @@ impl<'a> Parser<'a> {
                 }
 
                 curr_dialogue.character = RichString::from(inner);
-                *end_line = line_idx;
 
                 this.state = State::InDialogue;
             },
         )
     }
 
-    fn try_transition(&mut self, line: &str, line_idx: usize) -> bool {
+    fn try_transition(&mut self, line: &str, range: SourceRange) -> bool {
         self.try_(
             line,
             |this, line| {
@@ -447,7 +457,7 @@ impl<'a> Parser<'a> {
             |this, inner| {
                 this.elements.push(Span::new(
                     Element::Transition(RichString::from(inner)),
-                    line_idx,
+                    range,
                 ));
 
                 this.lines.next();
@@ -458,7 +468,9 @@ impl<'a> Parser<'a> {
     fn parse_title(&mut self) {
         let mut tp = TitlePage::new();
 
-        while let Some((i, line)) = self.lines.peek() {
+        while let Some(&logical) = self.lines.peek() {
+            let range = logical.range;
+            let line = self.text(logical);
             let Some((key, val)) = line.split_once(':') else {
                 break;
             };
@@ -469,7 +481,7 @@ impl<'a> Parser<'a> {
             if val.trim().is_empty() {
                 values = self.take_indented_block();
             } else {
-                values.push(Span::new(RichString::from(val), *i));
+                values.push(Span::new(RichString::from(val), range));
             }
 
             match key.trim().to_ascii_uppercase().as_str() {
@@ -500,10 +512,11 @@ impl<'a> Parser<'a> {
 
     fn take_indented_block(&mut self) -> Vec<Span<RichString>> {
         let mut out = Vec::new();
-        while let Some((i, next)) = self.lines.peek().copied() {
+        while let Some(&logical) = self.lines.peek() {
+            let next = self.text(logical);
             if next.starts_with("   ") {
                 self.lines.next();
-                out.push(Span::new(RichString::from(next.trim()), *i));
+                out.push(Span::new(RichString::from(next.trim()), logical.range));
             } else {
                 break;
             }
@@ -512,7 +525,9 @@ impl<'a> Parser<'a> {
     }
 
     fn next_line_is_empty(&mut self) -> bool {
-        self.lines.peek().is_none_or(|(_, s)| s.trim().is_empty())
+        self.lines
+            .peek()
+            .is_none_or(|line| line.text(self.src).trim().is_empty())
     }
 }
 
@@ -524,121 +539,15 @@ enum State {
     InBlock,
 }
 
-/// Type alias making it more clear what the tuple represents.
-type Line = (usize, String);
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    mod preprocessor {
-        use super::*;
-
-        macro_rules! test_preprocessor {
-            ($name:ident, $src:expr, [$(($line:expr, $expected:expr)),*]) => {
-                #[test]
-                fn $name() {
-                assert_eq!(
-                preprocess($src),
-                vec![$(($line, $expected.to_string())),*]
-                );
-                }
-            };
-        }
-
-        test_preprocessor!(trivial, "Hello\nWorld", [(1, "Hello"), (2, "World")]);
-
-        test_preprocessor!(
-            boneyard_mid_line,
-            "Hello /* removed */ World",
-            [(1, "Hello  World")]
-        );
-
-        test_preprocessor!(
-            boneyard_line_start,
-            "Hello\n/* removed */\nWorld",
-            [(1, "Hello"), (2, ""), (3, "World")]
-        );
-
-        test_preprocessor!(
-            boneyard_multiline_line_start,
-            "Hello\n/* multi\nline\nboneyard */\nWorld",
-            [(1, "Hello"), (2, ""), (5, "World")]
-        );
-
-        test_preprocessor!(
-            boneyard_multiline_mid_line,
-            "Hello /* multi\nline */ World",
-            [(1, "Hello  World")]
-        );
-
-        test_preprocessor!(
-            note_removed,
-            "Hello [[a note]] World",
-            [(1, "Hello  World")]
-        );
-
-        test_preprocessor!(
-            note_multiline_removed,
-            "Hello [[a\nnote]] World",
-            [(1, "Hello  World")]
-        );
-
-        test_preprocessor!(
-            note_break_double_newline,
-            "Hello [[a note\n\nWorld",
-            [(1, "Hello [[a note"), (2, ""), (3, "World")]
-        );
-
-        test_preprocessor!(
-            note_break_single_space_newline,
-            "Hello [[a note\n \nWorld",
-            [(1, "Hello [[a note"), (2, " "), (3, "World")]
-        );
-
-        test_preprocessor!(
-            not_note_break_single_letter_newline,
-            "Hello [[a note,\na\nWorld",
-            [(1, "Hello [[a note,"), (2, "a"), (3, "World")]
-        );
-
-        test_preprocessor!(note_unclosed, "Hello [[a note", [(1, "Hello [[a note")]);
-
-        test_preprocessor!(
-            note_with_boneyard_inside,
-            "Hello [[a /* b1 */ note /* b2 */ here]] World",
-            [(1, "Hello  World")]
-        );
-
-        test_preprocessor!(
-            boneyard_inside_note_breaks_note,
-            "Hello [[a note\n/* boneyard */\nWorld",
-            [(1, "Hello [[a note"), (2, ""), (3, "World")]
-        );
-
-        test_preprocessor!(
-            mixed_boneyard_and_note,
-            "/* boneyard */\n[[a note]]\nWorld",
-            [(1, ""), (2, ""), (3, "World")]
-        );
-
-        test_preprocessor!(
-            source_lines_preserved_after_boneyard,
-            "Line1\n/*\n\n\n*/\nLine2",
-            [(1, "Line1"), (2, ""), (6, "Line2")]
-        );
-
-        test_preprocessor!(
-            source_lines_preserved_after_note,
-            "Line1\n[[a\nmultiline\nnote]]\nLine2",
-            [(1, "Line1"), (2, ""), (5, "Line2")]
-        );
-
-        test_preprocessor!(
-            tabs_expand_to_four_spaces,
-            "a\tb\n\tc",
-            [(1, "a    b"), (2, "    c")]
-        );
+    #[test]
+    fn tabs_expand_to_four_spaces() {
+        assert_eq!(expand_tabs("a\tb".into()), "a    b");
+        assert_eq!(expand_tabs("\tc".into()), "    c");
+        assert!(matches!(expand_tabs("abc".into()), Cow::Borrowed(_)));
     }
 
     mod end_to_end_parse {
@@ -654,21 +563,30 @@ mod tests {
         }
 
         fn span<T>(inner: T) -> Span<T> {
-            Span::new(inner, 0)
+            Span::new(inner, SourceRange::from(0..0))
+        }
+
+        /// Zeroes the spans of the dialogue elements, so that an [`Element`] can be
+        /// compared by shape alone.
+        fn without_spans(element: &Element) -> Element {
+            let zero = |d: &Dialogue| {
+                let mut d = d.clone();
+                for e in &mut d.elements {
+                    e.span = SourceRange::from(0..0);
+                }
+                d
+            };
+            match element {
+                Element::Dialogue(d) => Element::Dialogue(zero(d)),
+                Element::DualDialogue(l, r) => Element::DualDialogue(zero(l), zero(r)),
+                other => other.clone(),
+            }
         }
 
         fn test_parse(input: &str, expected: impl IntoIterator<Item = Element>) {
             let parsed = parse(input);
-            for (
-                Span {
-                    start_line: _,
-                    end_line: _,
-                    inner: actual,
-                },
-                expected,
-            ) in parsed.elements.iter().zip(expected)
-            {
-                assert_eq!(actual, &expected);
+            for (Span { inner: actual, .. }, expected) in parsed.elements.iter().zip(expected) {
+                assert_eq!(without_spans(actual), expected);
             }
         }
 
@@ -1027,132 +945,164 @@ no",
         );
     }
 
-    /// Tests that the [`Span`] line numbers the parser attaches to elements are
-    /// correct.
+    /// Tests the byte ranges the parser attaches to what it parses.
     ///
-    /// Are tested seprately to not clutter the end-to-end tests.
-    ///
-    /// Line numbers are 1-indexed and refer to lines in the original source,
-    /// before boneyards and notes are stripped.
-    mod span_correctness {
+    /// Every test checks a range by slicing the source with it and comparing
+    /// the slice, so the expected values read as text instead of offsets.
+    /// A range always refers to the original source, so boneyards and notes are
+    /// included in the ranges they sit inside.
+    mod spans {
         use super::*;
 
-        fn element_spans(input: &str) -> Vec<(usize, usize)> {
-            parse(input)
-                .elements
-                .iter()
-                .map(|s| (s.start_line, s.end_line))
-                .collect()
+        /// The source slice covered by each top-level element, in order.
+        fn element_sources(src: &str) -> Vec<&str> {
+            parse(src).elements.iter().map(|e| &src[e.span]).collect()
         }
 
-        /// The `(start_line, end_line)` of every element inside each dialogue in
-        /// the screenplay, in document order. Both halves of a dual dialogue are
-        /// listed separately, so the outer `Vec` has one entry per spoken block.
-        fn dialogue_element_spans(input: &str) -> Vec<Vec<(usize, usize)>> {
-            parse(input)
-                .elements
-                .iter()
-                .flat_map(|s| match &s.inner {
-                    Element::Dialogue(d) => vec![d],
-                    Element::DualDialogue(left, right) => vec![left, right],
-                    _ => vec![],
-                })
-                .map(|d| spans(&d.elements))
-                .collect()
+        /// The source slice covered by each parenthetical and line of dialogue,
+        /// grouped per speaker. A dual dialogue gives two groups.
+        fn dialogue_part_sources(src: &str) -> Vec<Vec<&str>> {
+            let screenplay = parse(src);
+            let speakers = screenplay.elements.iter().flat_map(|e| match &e.inner {
+                Element::Dialogue(d) => vec![d],
+                Element::DualDialogue(left, right) => vec![left, right],
+                _ => vec![],
+            });
+            speakers.map(|d| sources(src, &d.elements)).collect()
         }
 
-        fn title_page(input: &str) -> TitlePage {
-            parse(input).titlepage.expect("expected a title page")
-        }
-
-        fn spans<T>(values: &[Span<T>]) -> Vec<(usize, usize)> {
-            values.iter().map(|s| (s.start_line, s.end_line)).collect()
+        /// The source slice covered by each of `values`.
+        fn sources<'s, T>(src: &'s str, values: &[Span<T>]) -> Vec<&'s str> {
+            values.iter().map(|v| &src[v.span]).collect()
         }
 
         #[test]
-        fn single_line_action_spans_one_line() {
-            assert_eq!(element_spans("A single line of action."), [(1, 1)]);
+        fn action_covers_its_line() {
+            assert_eq!(element_sources("Some action."), ["Some action."]);
         }
 
         #[test]
-        fn multi_line_action_spans_the_whole_block() {
-            let input = "First line of action.\nSecond line of action.\nThird line of action.";
-            assert_eq!(element_spans(input), [(1, 3)]);
+        fn consecutive_action_lines_form_one_element() {
+            let src = "One.\nTwo.\nThree.";
+            assert_eq!(element_sources(src), [src]);
         }
 
         #[test]
-        fn blank_lines_are_not_included_in_element_spans() {
-            let input = "INT. ROOM - DAY\n\nSome action here.\n\n===\n\nMore action.";
-            assert_eq!(element_spans(input), [(1, 1), (3, 3), (5, 5), (7, 7)]);
-        }
-
-        #[test]
-        fn elements_after_a_boneyard_keep_original_source_line_numbers() {
-            let input = "Action one.\n\n/* a\nmulti-line\nboneyard */\nAction two.";
-            assert_eq!(element_spans(input), [(1, 1), (6, 6)]);
-        }
-
-        #[test]
-        fn dialogue_spans_the_character_line_through_the_last_line() {
-            let input = "\nCHAR\n(sad)\nNooo!\n(angry)\nI am angry.";
-            assert_eq!(element_spans(input), [(2, 6)]);
+        fn blank_lines_belong_to_no_element() {
+            let src = "INT. ROOM - DAY\n\nSome action.\n\n===\n\nMore action.";
             assert_eq!(
-                dialogue_element_spans(input),
-                [vec![(3, 3), (4, 4), (5, 5), (6, 6)]]
+                element_sources(src),
+                ["INT. ROOM - DAY", "Some action.", "===", "More action."]
             );
         }
 
         #[test]
-        fn merged_dialogue_lines_span_all_their_source_lines() {
-            let input = "\nCHAR\nFirst line of dialogue.\nSecond line of dialogue.";
-            assert_eq!(element_spans(input), [(2, 4)]);
-            assert_eq!(dialogue_element_spans(input), [vec![(3, 4)]]);
+        fn boneyard_is_recorded_with_its_offsets_and_is_not_an_element() {
+            let src = "One.\n\n/* a\nmulti-line\nboneyard */\nTwo.";
+            let screenplay = parse(src);
+            assert_eq!(element_sources(src), ["One.", "Two."]);
+
+            let [boneyard] = screenplay.boneyards[..] else {
+                panic!("expected exactly one boneyard");
+            };
+            assert_eq!(&src[boneyard.span], "/* a\nmulti-line\nboneyard */");
+            assert_eq!(&src[boneyard.inner], " a\nmulti-line\nboneyard ");
         }
 
         #[test]
-        fn dual_dialogue_spans_both_halves() {
-            let input = "\nALICE\nHi there.\n\nBOB ^\nHello.";
-            assert_eq!(element_spans(input), [(2, 6)]);
-            assert_eq!(dialogue_element_spans(input), [vec![(3, 3)], vec![(6, 6)]]);
+        fn note_inside_a_line_is_in_the_element_range_but_not_its_content() {
+            let src = "Hello [[a note]] there.";
+            let screenplay = parse(src);
+            assert_eq!(element_sources(src), [src]);
+            assert_eq!(
+                screenplay.elements[0].inner,
+                Element::Action("Hello  there.".into())
+            );
+
+            let [note] = screenplay.notes[..] else {
+                panic!("expected exactly one note");
+            };
+            assert_eq!(&src[note.span], "[[a note]]");
+            assert_eq!(&src[note.inner], "a note");
         }
 
         #[test]
-        fn single_line_title_page_values_span_their_line() {
-            let input = "Title: My Movie\nCredit: Written by\nAuthor: A. Writer\n\nAction.";
-            let tp = title_page(input);
-            assert_eq!(spans(&tp.title), [(1, 1)]);
-            assert_eq!(spans(&tp.credit), [(2, 2)]);
-            assert_eq!(spans(&tp.authors), [(3, 3)]);
-            assert_eq!(element_spans(input), [(5, 5)]);
+        fn dialogue_runs_from_the_character_to_its_last_line() {
+            let src = "\nCHAR\n(sad)\nNooo!\n(angry)\nI am angry.";
+            assert_eq!(
+                element_sources(src),
+                ["CHAR\n(sad)\nNooo!\n(angry)\nI am angry."]
+            );
         }
 
         #[test]
-        fn indented_title_page_block_values_span_their_own_lines() {
-            let input = "Title:\n   My Movie\n   The Sequel\n\nAction.";
-            let tp = title_page(input);
-            assert_eq!(spans(&tp.title), [(2, 2), (3, 3)]);
-            assert_eq!(element_spans(input), [(5, 5)]);
+        fn dialogue_parentheticals_and_lines_have_their_own_ranges() {
+            let src = "\nCHAR\n(sad)\nNooo!\n(angry)\nI am angry.";
+            assert_eq!(
+                dialogue_part_sources(src),
+                [["(sad)", "Nooo!", "(angry)", "I am angry."]]
+            );
         }
 
         #[test]
-        fn element_spans_across_every_element_kind() {
-            let cases: &[(&str, &[(usize, usize)])] = &[
-                ("INT. ROOM - DAY", &[(1, 1)]),
-                (".FORCED HEADING", &[(1, 1)]),
-                ("Plain action.", &[(1, 1)]),
-                ("!INT. Forced action, not a heading.", &[(1, 1)]),
-                ("\nCUT TO:\n\nAfter the transition.", &[(2, 2), (4, 4)]),
-                ("\n> Forced transition to:\n\nAfter.", &[(2, 2), (4, 4)]),
-                ("> THE END <", &[(1, 1)]),
-                ("> centered one <\n> centered two <", &[(1, 2)]),
-                ("~A single sung line", &[(1, 1)]),
-                ("~verse one\n~verse two\n~verse three", &[(1, 3)]),
-                ("= A synopsis", &[(1, 1)]),
-                ("===", &[(1, 1)]),
+        fn consecutive_dialogue_lines_form_one_part() {
+            let src = "\nCHAR\nFirst line.\nSecond line.";
+            assert_eq!(dialogue_part_sources(src), [["First line.\nSecond line."]]);
+        }
+
+        #[test]
+        fn dual_dialogue_covers_both_speakers() {
+            let src = "\nALICE\nHi there.\n\nBOB ^\nHello.";
+            assert_eq!(element_sources(src), ["ALICE\nHi there.\n\nBOB ^\nHello."]);
+            assert_eq!(
+                dialogue_part_sources(src),
+                [vec!["Hi there."], vec!["Hello."]]
+            );
+        }
+
+        #[test]
+        fn title_page_value_covers_its_whole_line_including_the_key() {
+            let src = "Title: My Movie\nCredit: Written by\nAuthor: A. Writer\n\nAction.";
+            let title_page = parse(src).titlepage.expect("expected a title page");
+            assert_eq!(sources(src, &title_page.title), ["Title: My Movie"]);
+            assert_eq!(sources(src, &title_page.credit), ["Credit: Written by"]);
+            assert_eq!(sources(src, &title_page.authors), ["Author: A. Writer"]);
+            assert_eq!(element_sources(src), ["Action."]);
+        }
+
+        #[test]
+        fn indented_title_page_values_each_cover_one_line() {
+            let src = "Title:\n   My Movie\n   The Sequel\n\nAction.";
+            let title_page = parse(src).titlepage.expect("expected a title page");
+            assert_eq!(
+                sources(src, &title_page.title),
+                ["   My Movie", "   The Sequel"]
+            );
+            assert_eq!(element_sources(src), ["Action."]);
+        }
+
+        #[test]
+        fn every_kind_of_element_covers_its_source_lines() {
+            let cases: &[(&str, &[&str])] = &[
+                ("INT. ROOM - DAY", &["INT. ROOM - DAY"]),
+                (".FORCED HEADING", &[".FORCED HEADING"]),
+                ("Plain action.", &["Plain action."]),
+                ("!INT. Forced action.", &["!INT. Forced action."]),
+                ("\nCUT TO:\n\nAfter.", &["CUT TO:", "After."]),
+                (
+                    "\n> Forced transition\n\nAfter.",
+                    &["> Forced transition", "After."],
+                ),
+                ("> THE END <", &["> THE END <"]),
+                ("> one <\n> two <", &["> one <\n> two <"]),
+                ("~A sung line", &["~A sung line"]),
+                ("~verse one\n~verse two", &["~verse one\n~verse two"]),
+                ("= A synopsis", &["= A synopsis"]),
+                ("===", &["==="]),
                 ("# A section produces no element", &[]),
             ];
-            for (input, expected) in cases {
-                assert_eq!(&element_spans(input), expected, "input: {input:?}");
+            for (src, expected) in cases {
+                assert_eq!(&element_sources(src), expected, "input: {src:?}");
             }
         }
     }

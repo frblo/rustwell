@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{
     export::Exporter,
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element, Screenplay, Span, TitlePage},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay, SourceRange, Span, TitlePage},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -22,7 +22,8 @@ pub struct HtmlExporter {
     pub standalone: bool,
     /// If synopses should be included in the output
     pub synopses: bool,
-    /// Decides if the `html` should include the line span for each element
+    /// Decides if the `html` should include the source byte offsets (`data-start` and
+    /// `data-end`) for each element
     pub include_source_positions: bool,
 }
 
@@ -106,8 +107,8 @@ impl HtmlExporter {
             .map(|s| {
                 format!(
                     "<p {}>{}</p>",
-                    self.source_position_attrs(s.start_line, s.end_line),
-                    self.format_rich_string(s)
+                    self.source_position_attrs(s.span),
+                    self.format_rich_string(&s.inner)
                 )
             })
             .collect::<Vec<String>>()
@@ -189,7 +190,7 @@ impl HtmlExporter {
         format!(
             r#"<div class="{}" {}>{}</div>"#,
             class,
-            self.source_position_attrs(element.start_line, element.end_line),
+            self.source_position_attrs(element.span),
             content
         )
     }
@@ -248,7 +249,7 @@ impl HtmlExporter {
 
     /// Formats a [`DialogueElement`] into a `html`-[String].
     fn format_dialogue_element(&self, element: &Span<DialogueElement>) -> String {
-        let attrs = self.source_position_attrs(element.start_line, element.end_line);
+        let attrs = self.source_position_attrs(element.span);
         match &element.inner {
             DialogueElement::Parenthetical(s) => {
                 format!(
@@ -267,11 +268,11 @@ impl HtmlExporter {
             .replace('>', "&gt;")
     }
 
-    /// Renders the `data-start-line`/`data-end-line` attributes for a span, or an empty string
-    /// if [`Self::include_source_positions`] is disabled.
-    fn source_position_attrs(&self, start_line: usize, end_line: usize) -> String {
+    /// Renders the `data-start`/`data-end` attributes, the byte offsets of a span in the
+    /// source, or an empty string if [`Self::include_source_positions`] is disabled.
+    fn source_position_attrs(&self, span: SourceRange) -> String {
         if self.include_source_positions {
-            format!(r#"data-start-line="{start_line}" data-end-line="{end_line}""#)
+            format!(r#"data-start="{}" data-end="{}""#, span.start, span.end)
         } else {
             String::new()
         }

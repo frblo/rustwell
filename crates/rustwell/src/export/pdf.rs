@@ -302,8 +302,7 @@ impl PdfExporter {
 
             // Element loop, iterates through the screenplay elements.
             while let Some(Span {
-                start_line: _,
-                end_line: _,
+                span: _,
                 inner: element,
             }) = element_iter.peek()
             {
@@ -580,7 +579,7 @@ fn write_dialogue(
             None => 0,
         };
 
-        let (content, margin) = match &*dialogue.elements[dialogue_index] {
+        let (content, margin) = match &dialogue.elements[dialogue_index].inner {
             DialogueElement::Parenthetical(s) => (s, &dialogue_margins.parenthetical),
             DialogueElement::Line(s) => (s, &dialogue_margins.line),
         };
@@ -877,7 +876,7 @@ fn write_titlepage(
                 for s in &titlepage.$element {
                     let residual = write_element(
                         layout_info,
-                        s,
+                        &s.inner,
                         &TITLE_PAGE_MARGINS.$element,
                         &mut 0,
                         &mut line_idx,
@@ -902,7 +901,7 @@ fn write_titlepage(
                 let mut total_lines = titlepage.$element.len();
                 for s in &titlepage.$element {
                     total_lines += break_points(
-                        s,
+                        &s.inner,
                         glyph_span(
                             layout_info.size,
                             TITLE_PAGE_MARGINS.$element.left,
@@ -923,7 +922,7 @@ fn write_titlepage(
                 for s in &titlepage.$element {
                     write_element(
                         layout_info,
-                        s,
+                        &s.inner,
                         &TITLE_PAGE_MARGINS.$element,
                         &mut 0,
                         &mut line_idx,

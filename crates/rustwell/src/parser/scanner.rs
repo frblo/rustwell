@@ -7,6 +7,8 @@
 use core::range::Range;
 use std::borrow::Cow;
 
+use crate::screenplay::{Boneyard, Note};
+
 /// A byte range into the source.
 pub type Span = Range<usize>;
 
@@ -66,28 +68,6 @@ pub enum Segment {
     /// Either a boneyard or a note, these are also tracked on the
     /// resulting [`Scan`] struct.
     Ignored(Span),
-}
-
-/// A `/* */` boneyard located in the source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Boneyard {
-    /// The whole boneyard: `/*`, the content, and `*/` when present (an
-    /// unterminated boneyard runs to end of input).
-    pub span: Span,
-    /// The content between the delimiters.
-    pub inner: Span,
-}
-
-/// A `[[ ]]` closed note located in the source.
-///
-/// A `[[` with no matching `]]` before a blank line or end of input is not
-/// closed and therefore not a [`Note`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Note {
-    /// The whole note: `[[`, the content, and `]]`.
-    pub span: Span,
-    /// The content between the delimiters.
-    pub inner: Span,
 }
 
 /// Splits `src` into logical lines without allocating a rewritten copy, pulling
