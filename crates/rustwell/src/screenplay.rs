@@ -39,25 +39,29 @@ impl<T> Span<T> {
 }
 
 /// A `/* */` boneyard located in the source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Boneyard {
     /// The whole boneyard: `/*`, the content, and `*/` when present (an
     /// unterminated boneyard runs to end of input).
     pub span: SourceRange,
-    /// The content between the delimiters.
+    /// The range of the content between the delimiters.
     pub inner: SourceRange,
+    /// The content between the delimiters, as written.
+    pub text: String,
 }
 
 /// A `[[ ]]` closed note located in the source.
 ///
 /// A `[[` with no matching `]]` before a blank line or end of input is not
 /// closed and therefore not a [`Note`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Note {
     /// The whole note: `[[`, the content, and `]]`.
     pub span: SourceRange,
-    /// The content between the delimiters.
+    /// The range of the content between the delimiters.
     pub inner: SourceRange,
+    /// The content between the delimiters, as written.
+    pub text: String,
 }
 
 /// Returns the 1-based line and 1-based column (in characters) of byte `offset` in `src`.

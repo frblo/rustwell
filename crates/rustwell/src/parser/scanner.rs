@@ -96,7 +96,11 @@ pub fn scan(src: &str) -> Scan {
                     let inner = Span::from(open + 2..close - 2);
                     physical_line += newlines(&src[span]);
                     segments.push(Segment::Ignored(span));
-                    notes.push(Note { span, inner });
+                    notes.push(Note {
+                        span,
+                        inner,
+                        text: src[inner].to_string(),
+                    });
                     collect_boneyards(src, inner, &mut boneyards);
                     segment_text_start = close;
                     pos = close;
@@ -111,7 +115,11 @@ pub fn scan(src: &str) -> Scan {
                 let inner = Span::from(open + 2..close.unwrap_or(src.len()));
                 physical_line += newlines(&src[inner]);
                 segments.push(Segment::Ignored(span));
-                boneyards.push(Boneyard { span, inner });
+                boneyards.push(Boneyard {
+                    span,
+                    inner,
+                    text: src[inner].to_string(),
+                });
                 segment_text_start = span.end;
                 pos = span.end;
             }
@@ -267,9 +275,11 @@ fn collect_boneyards(src: &str, range: Span, out: &mut Vec<Boneyard>) {
             .find("*/")
             .map(|k| open + 2 + k);
         let span = Span::from(open..close.map_or(range.end, |c| c + 2));
+        let inner = Span::from(open + 2..close.unwrap_or(range.end));
         out.push(Boneyard {
             span,
-            inner: Span::from(open + 2..close.unwrap_or(range.end)),
+            inner,
+            text: src[inner].to_string(),
         });
         i = span.end;
     }
@@ -342,6 +352,7 @@ mod tests {
             [Boneyard {
                 span: Span::from(6..19),
                 inner: Span::from(8..17),
+                text: " removed ".to_string(),
             }]
         );
         assert_eq!(
@@ -392,6 +403,7 @@ mod tests {
             [Boneyard {
                 span: Span::from(4..10),
                 inner: Span::from(6..10),
+                text: " bar".to_string(),
             }]
         );
     }
@@ -405,6 +417,7 @@ mod tests {
             [Note {
                 span: Span::from(6..16),
                 inner: Span::from(8..14),
+                text: "a note".to_string(),
             }]
         );
     }

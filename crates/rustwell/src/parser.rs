@@ -1022,11 +1022,12 @@ no",
             let screenplay = parse(src);
             assert_eq!(element_sources(src), ["One.", "Two."]);
 
-            let [boneyard] = screenplay.boneyards[..] else {
+            let [boneyard] = &screenplay.boneyards[..] else {
                 panic!("expected exactly one boneyard");
             };
             assert_eq!(&src[boneyard.span], "/* a\nmulti-line\nboneyard */");
             assert_eq!(&src[boneyard.inner], " a\nmulti-line\nboneyard ");
+            assert_eq!(boneyard.text, " a\nmulti-line\nboneyard ");
         }
 
         #[test]
@@ -1039,11 +1040,12 @@ no",
                 Element::Action("Hello  there.".into())
             );
 
-            let [note] = screenplay.notes[..] else {
+            let [note] = &screenplay.notes[..] else {
                 panic!("expected exactly one note");
             };
             assert_eq!(&src[note.span], "[[a note]]");
             assert_eq!(&src[note.inner], "a note");
+            assert_eq!(note.text, "a note");
         }
 
         #[test]
