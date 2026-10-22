@@ -144,7 +144,10 @@ impl HtmlExporter {
                     },
                 ),
             ),
-            Element::Action(s) => ("action", format!("<p>{}</p>", self.format_rich_string(s))),
+            Element::Action(s) => (
+                "action",
+                format!("<p>{}</p>", self.format_rich_string(&s.join())),
+            ),
             Element::Dialogue(dialogue) => (
                 "dialogue",
                 format!(
@@ -173,16 +176,16 @@ impl HtmlExporter {
             ),
             Element::Lyrics(s) => (
                 "lyrics",
-                format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
+                format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
             Element::Transition(s) => ("transition", self.format_rich_string(s)),
             Element::CenteredText(s) => (
                 "action centered",
-                format!(r"<p>{}</p>", self.format_rich_string(s)),
+                format!(r"<p>{}</p>", self.format_rich_string(&s.join())),
             ),
             Element::Synopsis(s) => (
                 "synopsis",
-                format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
+                format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
             Element::PageBreak => ("", String::new()), // No pagebreaks in html
         };
@@ -237,28 +240,45 @@ impl HtmlExporter {
         )
     }
 
-    /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
-    /// [`DialogueElement`]s.
+    /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String]. Consecutive
+    /// [`DialogueElement::Line`]s are one paragraph, with a line break between the lines.
     fn format_dialogue(&self, dialogue: &[Span<DialogueElement>]) -> String {
-        dialogue
-            .iter()
-            .map(|d| self.format_dialogue_element(d))
-            .collect::<Vec<String>>()
-            .join("\n")
-    }
-
-    /// Formats a [`DialogueElement`] into a `html`-[String].
-    fn format_dialogue_element(&self, element: &Span<DialogueElement>) -> String {
-        let attrs = self.source_position_attrs(element.span);
-        match &element.inner {
-            DialogueElement::Parenthetical(s) => {
-                format!(
-                    r#"<p class="parenthetical" {attrs}>{}</p>"#,
-                    self.format_rich_string(s)
-                )
+        let mut paragraphs = Vec::new();
+        let mut rest = dialogue;
+        while let Some((first, tail)) = rest.split_first() {
+            match &first.inner {
+                DialogueElement::Parenthetical(s) => {
+                    let attrs = self.source_position_attrs(first.span);
+                    paragraphs.push(format!(
+                        r#"<p class="parenthetical" {attrs}>{}</p>"#,
+                        self.format_rich_string(s)
+                    ));
+                    rest = tail;
+                }
+                DialogueElement::Line(_) => {
+                    let run_len = rest
+                        .iter()
+                        .take_while(|e| matches!(e.inner, DialogueElement::Line(_)))
+                        .count();
+                    let (run, tail) = rest.split_at(run_len);
+                    let text = RichString::join(
+                        run.iter().filter_map(|e| match &e.inner {
+                            DialogueElement::Line(s) => Some(s),
+                            DialogueElement::Parenthetical(_) => None,
+                        }),
+                        "\n",
+                    );
+                    let span = SourceRange::from(first.span.start..run[run_len - 1].span.end);
+                    let attrs = self.source_position_attrs(span);
+                    paragraphs.push(format!(
+                        r"<p {attrs}>{}</p>",
+                        self.format_rich_string(&text)
+                    ));
+                    rest = tail;
+                }
             }
-            DialogueElement::Line(s) => format!(r"<p {attrs}>{}</p>", self.format_rich_string(s)),
         }
+        paragraphs.join("\n")
     }
 
     /// Encodes potentially dangerous patterns in `html`

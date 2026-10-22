@@ -85,14 +85,68 @@ pub enum Element {
         slug: RichString,
         number: Option<String>,
     },
-    Action(RichString),
+    Action(Lines),
     Dialogue(Dialogue),
     DualDialogue(Dialogue, Dialogue),
-    Lyrics(RichString),
+    Lyrics(Lines),
     Transition(RichString),
-    CenteredText(RichString),
-    Synopsis(RichString),
+    CenteredText(Lines),
+    Synopsis(Lines),
     PageBreak,
+}
+
+/// A run of consecutive source lines, each with its own range.
+///
+/// A line that is only two spaces (an intentional blank line) is kept as an empty line.
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Default)]
+pub struct Lines(Vec<Span<RichString>>);
+
+impl Lines {
+    /// The lines, in order.
+    pub fn iter(&self) -> std::slice::Iter<'_, Span<RichString>> {
+        self.0.iter()
+    }
+
+    /// The number of lines.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Whether there are no lines.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Adds a line after the last one.
+    pub(crate) fn push(&mut self, line: Span<RichString>) {
+        self.0.push(line);
+    }
+
+    /// The lines joined into one [`RichString`] with a newline between each.
+    pub fn join(&self) -> RichString {
+        RichString::join(self.iter().map(|line| &line.inner), "\n")
+    }
+}
+
+impl AsRef<[Span<RichString>]> for Lines {
+    fn as_ref(&self) -> &[Span<RichString>] {
+        &self.0
+    }
+}
+
+impl From<Vec<Span<RichString>>> for Lines {
+    fn from(lines: Vec<Span<RichString>>) -> Self {
+        Lines(lines)
+    }
+}
+
+impl<'a> IntoIterator for &'a Lines {
+    type Item = &'a Span<RichString>;
+    type IntoIter = std::slice::Iter<'a, Span<RichString>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 /// Dialogue consisting of a character name, an extension, parentheticals and lines.
@@ -127,7 +181,10 @@ impl Default for Dialogue {
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum DialogueElement {
+    /// A line wrapped in parentheses.
     Parenthetical(RichString),
+    /// One source line of speech. Consecutive lines are consecutive elements, and a line that is
+    /// only two spaces (an intentional blank line) is an empty line.
     Line(RichString),
 }
 

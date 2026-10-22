@@ -7,6 +7,7 @@ use crate::rich_string::RichString;
 use crate::screenplay::Dialogue;
 use crate::screenplay::DialogueElement;
 use crate::screenplay::Element;
+use crate::screenplay::Lines;
 use crate::screenplay::Screenplay;
 use crate::screenplay::SourceRange;
 use crate::screenplay::Span;
@@ -112,6 +113,38 @@ struct LineView<'t> {
     range: SourceRange,
 }
 
+/// The kinds of element made of consecutive lines.
+#[derive(Debug, Clone, Copy)]
+enum Block {
+    Action,
+    Lyrics,
+    Centered,
+    Synopsis,
+}
+
+impl Block {
+    /// The lines of `element` if it is a block of this kind.
+    fn lines_mut(self, element: &mut Element) -> Option<&mut Lines> {
+        match (self, element) {
+            (Block::Action, Element::Action(lines))
+            | (Block::Lyrics, Element::Lyrics(lines))
+            | (Block::Centered, Element::CenteredText(lines))
+            | (Block::Synopsis, Element::Synopsis(lines)) => Some(lines),
+            _ => None,
+        }
+    }
+
+    /// A new element of this kind holding `lines`.
+    fn element(self, lines: Lines) -> Element {
+        match self {
+            Block::Action => Element::Action(lines),
+            Block::Lyrics => Element::Lyrics(lines),
+            Block::Centered => Element::CenteredText(lines),
+            Block::Synopsis => Element::Synopsis(lines),
+        }
+    }
+}
+
 /// A parser rule. Returns `true` if it claimed the line, having added it to
 /// the screenplay, and `false` to leave the line to the next rule.
 type Rule = for<'a, 'v> fn(&mut Parser<'a>, &LineView<'v>) -> bool;
@@ -144,8 +177,8 @@ const DEFAULT_RULES: &[Rule] = rules![
     action,
 ];
 
-/// The rules for a line directly after centered text, lyrics or action.
-const IN_BLOCK_RULES: &[Rule] = rules![centered, lyrics, action];
+/// The rules for a line directly after centered text, lyrics, a synopsis or action.
+const IN_BLOCK_RULES: &[Rule] = rules![centered, lyrics, synopsis, action];
 
 /// Internal parser state machine for Fountain.
 ///
@@ -209,20 +242,10 @@ impl<'a> Parser<'a> {
                         continue;
                     }
 
-                    if let Some(Span {
-                        inner: DialogueElement::Line(rs),
-                        span,
-                    }) = curr_dialogue.elements.last_mut()
-                    {
-                        rs.push_str("\n");
-                        rs.push_str(view.trimmed);
-                        span.end = view.range.end;
-                    } else {
-                        curr_dialogue.elements.push(Span::new(
-                            DialogueElement::Line(RichString::from(view.trimmed)),
-                            view.range,
-                        ));
-                    }
+                    curr_dialogue.elements.push(Span::new(
+                        DialogueElement::Line(RichString::from(view.trimmed)),
+                        view.range,
+                    ));
                 }
                 State::InBlock => self.apply_rules(IN_BLOCK_RULES, &view),
             }
@@ -252,27 +275,15 @@ impl<'a> Parser<'a> {
     }
 
     fn synopsis(&mut self, line: &LineView) -> bool {
+        // `===` is a page break, which only starts a line outside a block.
+        if line.trimmed.starts_with("===") {
+            return false;
+        }
         let Some(inner) = line.trimmed.strip_prefix('=') else {
             return false;
         };
 
-        if self.state == State::InBlock
-            && let Some(Span {
-                span,
-                inner: Element::Synopsis(rs),
-            }) = self.elements.last_mut()
-        {
-            rs.push_str("\n");
-            rs.push_str(inner);
-            span.end = line.range.end;
-            return true;
-        }
-
-        self.elements.push(Span::new(
-            Element::Synopsis(RichString::from(inner)),
-            line.range,
-        ));
-        self.state = State::InBlock;
+        self.push_block_line(Block::Synopsis, inner, line.range);
         true
     }
 
@@ -291,11 +302,7 @@ impl<'a> Parser<'a> {
             return false;
         };
 
-        self.elements.push(Span::new(
-            Element::Action(RichString::from(inner)),
-            line.range,
-        ));
-        self.state = State::InBlock;
+        self.push_block_line(Block::Action, inner, line.range);
         true
     }
 
@@ -307,25 +314,8 @@ impl<'a> Parser<'a> {
         else {
             return false;
         };
-        let inner = inner.trim();
 
-        if self.state == State::InBlock
-            && let Some(Span {
-                span,
-                inner: Element::CenteredText(rs),
-            }) = self.elements.last_mut()
-        {
-            rs.push_str("\n");
-            rs.push_str(inner);
-            span.end = line.range.end;
-            return true;
-        }
-
-        self.elements.push(Span::new(
-            Element::CenteredText(RichString::from(inner)),
-            line.range,
-        ));
-        self.state = State::InBlock;
+        self.push_block_line(Block::Centered, inner.trim(), line.range);
         true
     }
 
@@ -334,45 +324,34 @@ impl<'a> Parser<'a> {
             return false;
         };
 
-        if self.state == State::InBlock
-            && let Some(Span {
-                span,
-                inner: Element::Lyrics(rs),
-            }) = self.elements.last_mut()
-        {
-            rs.push_str("\n");
-            rs.push_str(inner);
-            span.end = line.range.end;
-            return true;
-        }
-
-        self.elements.push(Span::new(
-            Element::Lyrics(RichString::from(inner)),
-            line.range,
-        ));
-        self.state = State::InBlock;
+        self.push_block_line(Block::Lyrics, inner, line.range);
         true
     }
 
     fn action(&mut self, line: &LineView) -> bool {
+        self.push_block_line(Block::Action, line.raw, line.range);
+        true
+    }
+
+    /// Adds a line to the block element being built, or starts a new one.
+    ///
+    /// The line continues the last element if that is a block of the same kind and the parser
+    /// is in a block, otherwise it begins a new element.
+    fn push_block_line(&mut self, block: Block, text: &str, range: SourceRange) {
+        let line = Span::new(RichString::from(text), range);
+
         if self.state == State::InBlock
-            && let Some(Span {
-                span,
-                inner: Element::Action(rs),
-            }) = self.elements.last_mut()
+            && let Some(last) = self.elements.last_mut()
+            && let Some(lines) = block.lines_mut(&mut last.inner)
         {
-            rs.push_str("\n");
-            rs.push_str(line.raw);
-            span.end = line.range.end;
-            return true;
+            lines.push(line);
+            last.span.end = range.end;
+            return;
         }
 
-        self.elements.push(Span::new(
-            Element::Action(RichString::from(line.raw)),
-            line.range,
-        ));
+        self.elements
+            .push(Span::new(block.element(vec![line].into()), range));
         self.state = State::InBlock;
-        true
     }
 
     fn heading(&mut self, line: &LineView) -> bool {
@@ -582,23 +561,47 @@ mod tests {
             };
         }
 
-        fn span<T>(inner: T) -> Span<T> {
-            Span::new(inner, SourceRange::from(0..0))
+        fn zero_span() -> SourceRange {
+            SourceRange::from(0..0)
         }
 
-        /// Zeroes the spans of the dialogue elements, so that an [`Element`] can be
-        /// compared by shape alone.
+        fn span<T>(inner: T) -> Span<T> {
+            Span::new(inner, zero_span())
+        }
+
+        /// Lines with the given text and zeroed ranges.
+        fn lines(texts: &[&str]) -> Lines {
+            texts
+                .iter()
+                .map(|text| span((*text).into()))
+                .collect::<Vec<_>>()
+                .into()
+        }
+
+        /// Zeroes the spans of the lines and dialogue elements inside an [`Element`].
         fn without_spans(element: &Element) -> Element {
-            let zero = |d: &Dialogue| {
+            let zero_dialogue = |d: &Dialogue| {
                 let mut d = d.clone();
                 for e in &mut d.elements {
-                    e.span = SourceRange::from(0..0);
+                    e.span = zero_span();
                 }
                 d
             };
+            let zero_lines = |l: &Lines| {
+                l.iter()
+                    .map(|line| span(line.inner.clone()))
+                    .collect::<Vec<_>>()
+                    .into()
+            };
             match element {
-                Element::Dialogue(d) => Element::Dialogue(zero(d)),
-                Element::DualDialogue(l, r) => Element::DualDialogue(zero(l), zero(r)),
+                Element::Dialogue(d) => Element::Dialogue(zero_dialogue(d)),
+                Element::DualDialogue(l, r) => {
+                    Element::DualDialogue(zero_dialogue(l), zero_dialogue(r))
+                }
+                Element::Action(l) => Element::Action(zero_lines(l)),
+                Element::Lyrics(l) => Element::Lyrics(zero_lines(l)),
+                Element::CenteredText(l) => Element::CenteredText(zero_lines(l)),
+                Element::Synopsis(l) => Element::Synopsis(zero_lines(l)),
                 other => other.clone(),
             }
         }
@@ -622,7 +625,7 @@ mod tests {
         test_screenplay!(
             does_not_parse_heading_whitout_dot,
             "Intro music plays.",
-            [Element::Action("Intro music plays.".into())]
+            [Element::Action(lines(&["Intro music plays."]))]
         );
 
         test_screenplay!(
@@ -655,17 +658,17 @@ mod tests {
         test_screenplay!(
             parses_action,
             "They look at the test output - it's all failing.",
-            [Element::Action(
-                "They look at the test output - it's all failing.".into()
-            )]
+            [Element::Action(lines(&[
+                "They look at the test output - it's all failing."
+            ]))]
         );
 
         test_screenplay!(
             parses_action_forced,
             "!INT. They look at the test output - it's all failing.",
-            [Element::Action(
-                "INT. They look at the test output - it's all failing.".into(),
-            )]
+            [Element::Action(lines(&[
+                "INT. They look at the test output - it's all failing."
+            ]))]
         );
 
         test_screenplay!(
@@ -769,7 +772,7 @@ YES!",
         test_screenplay!(
             parses_lyrics,
             "~Hey ho let's go",
-            [Element::Lyrics("Hey ho let's go".into())]
+            [Element::Lyrics(lines(&["Hey ho let's go"]))]
         );
 
         test_screenplay!(
@@ -787,7 +790,7 @@ YES!",
         test_screenplay!(
             parses_centered,
             "> The end    <",
-            [Element::CenteredText("The end".into())]
+            [Element::CenteredText(lines(&["The end"]))]
         );
 
         test_screenplay!(parses_pagebreak_with_3_equals, "===", [Element::PageBreak]);
@@ -801,9 +804,9 @@ YES!",
         test_screenplay!(
             parses_synopsis,
             "=In this scene everyone gets cake.",
-            [Element::Synopsis(
-                "In this scene everyone gets cake.".into(),
-            )]
+            [Element::Synopsis(lines(&[
+                "In this scene everyone gets cake."
+            ]))]
         );
 
         test_screenplay!(
@@ -821,7 +824,7 @@ House is empty.",
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("House is empty.".into())
+                Element::Action(lines(&["House is empty."]))
             ]
         );
 
@@ -840,14 +843,14 @@ House is empty.",
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("House is empty.".into())
+                Element::Action(lines(&["House is empty."]))
             ]
         );
 
         test_screenplay!(
             filters_out_boneyard_inlined,
             "The house is /*extremely full*/empty.",
-            [Element::Action("The house is empty.".into())]
+            [Element::Action(lines(&["The house is empty."]))]
         );
 
         test_screenplay!(
@@ -881,14 +884,14 @@ House is empty.",
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("House is empty.".into())
+                Element::Action(lines(&["House is empty."]))
             ]
         );
 
         test_screenplay!(
             filters_out_note_inlined,
             "The house is [[should it be full?]]empty.",
-            [Element::Action("The house is empty.".into())]
+            [Element::Action(lines(&["The house is empty."]))]
         );
 
         test_screenplay!(
@@ -904,7 +907,7 @@ The house [[ This is a note
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("The house is empty.".into())
+                Element::Action(lines(&["The house is empty."]))
             ]
         );
 
@@ -916,7 +919,7 @@ The house [[ This is a note
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("The house is empty.".into())
+                Element::Action(lines(&["The house is empty."]))
             ]
         );
 
@@ -933,15 +936,15 @@ no",
                     slug: "INT. HOUSE".into(),
                     number: None,
                 },
-                Element::Action("The house [[wow".into()),
-                Element::Action("no".into())
+                Element::Action(lines(&["The house [[wow"])),
+                Element::Action(lines(&["no"]))
             ]
         );
 
         test_screenplay!(
             not_filters_out_unended_note,
             "This is [[ not right",
-            [Element::Action("This is [[ not right".into())]
+            [Element::Action(lines(&["This is [[ not right"]))]
         );
 
         test_screenplay!(
@@ -960,7 +963,11 @@ no",
             [Element::Dialogue(Dialogue {
                 character: "NAME".into(),
                 extension: None,
-                elements: vec![span(DialogueElement::Line("This dialogue should visibly have a line below it.\n\nVisually separating it from this line, due to the two spaces at the start of the previous line.".into()))]
+                elements: vec![
+                    span(DialogueElement::Line("This dialogue should visibly have a line below it.".into())),
+                    span(DialogueElement::Line("".into())),
+                    span(DialogueElement::Line("Visually separating it from this line, due to the two spaces at the start of the previous line.".into())),
+                ]
             })]
         );
     }
@@ -1008,6 +1015,52 @@ no",
         }
 
         #[test]
+        fn each_line_of_a_block_has_its_own_range() {
+            let src = "One.\nTwo.\nThree.";
+            let screenplay = parse(src);
+            let [
+                Span {
+                    inner: Element::Action(lines),
+                    ..
+                },
+            ] = &screenplay.elements[..]
+            else {
+                panic!("expected a single action element");
+            };
+            assert_eq!(sources(src, lines.as_ref()), ["One.", "Two.", "Three."]);
+        }
+
+        #[test]
+        fn lines_of_every_block_kind_are_kept_apart() {
+            let cases: &[(&str, &[&str])] = &[
+                ("~one\n~two", &["~one", "~two"]),
+                ("> one <\n> two <", &["> one <", "> two <"]),
+                ("!one\ntwo", &["!one", "two"]),
+                ("=one\n=two", &["=one", "=two"]),
+            ];
+            for (src, expected) in cases {
+                let screenplay = parse(src);
+                let [Span { inner, .. }] = &screenplay.elements[..] else {
+                    panic!("expected a single element for {src:?}");
+                };
+                let (Element::Action(lines)
+                | Element::Lyrics(lines)
+                | Element::CenteredText(lines)
+                | Element::Synopsis(lines)) = inner
+                else {
+                    panic!("expected a block element for {src:?}");
+                };
+                assert_eq!(&sources(src, lines.as_ref()), expected, "input: {src:?}");
+            }
+        }
+
+        #[test]
+        fn dialogue_lines_are_kept_apart_and_a_blank_line_is_empty() {
+            let src = "CHAR\nOne.\n  \nTwo.";
+            assert_eq!(dialogue_part_sources(src), [["One.", "  ", "Two."]]);
+        }
+
+        #[test]
         fn blank_lines_belong_to_no_element() {
             let src = "INT. ROOM - DAY\n\nSome action.\n\n===\n\nMore action.";
             assert_eq!(
@@ -1035,10 +1088,10 @@ no",
             let src = "Hello [[a note]] there.";
             let screenplay = parse(src);
             assert_eq!(element_sources(src), [src]);
-            assert_eq!(
-                screenplay.elements[0].inner,
-                Element::Action("Hello  there.".into())
-            );
+            let Element::Action(lines) = &screenplay.elements[0].inner else {
+                panic!("expected action");
+            };
+            assert_eq!(lines.join().to_plain_string(), "Hello  there.");
 
             let [note] = &screenplay.notes[..] else {
                 panic!("expected exactly one note");
@@ -1067,9 +1120,12 @@ no",
         }
 
         #[test]
-        fn consecutive_dialogue_lines_form_one_part() {
+        fn consecutive_dialogue_lines_are_separate_parts() {
             let src = "\nCHAR\nFirst line.\nSecond line.";
-            assert_eq!(dialogue_part_sources(src), [["First line.\nSecond line."]]);
+            assert_eq!(
+                dialogue_part_sources(src),
+                [["First line.", "Second line."]]
+            );
         }
 
         #[test]

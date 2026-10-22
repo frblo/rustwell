@@ -137,7 +137,7 @@ impl RichString {
         RichIterator {
             rich_string: self,
             element_idx: 0,
-            chars_iterator: self.elements[0].text.chars(),
+            chars_iterator: self.elements.first().map_or("".chars(), |e| e.text.chars()),
         }
     }
 
@@ -164,6 +164,23 @@ impl RichString {
         let (tokens, mut delimiters) = Self::tokenize(str);
         let matches = Self::match_delimiters(&mut delimiters);
         self.push_parsed(&tokens, &delimiters, &matches);
+    }
+
+    /// Joins `parts` into one [`RichString`], with `separator` between them.
+    ///
+    /// The parts keep the styles they were parsed with, so styling never runs across a separator.
+    pub(crate) fn join<'a>(
+        parts: impl IntoIterator<Item = &'a RichString>,
+        separator: &str,
+    ) -> RichString {
+        let mut joined = RichString::new();
+        for (i, part) in parts.into_iter().enumerate() {
+            if i > 0 {
+                joined.push_str(separator);
+            }
+            joined.append(part.clone());
+        }
+        joined
     }
 
     /// Converts the [`RichString`] to a plain [`String`] by just combining the string elements
@@ -570,6 +587,17 @@ mod tests {
         let other: RichString = "*c*d".into();
         rs.append(other);
         assert_eq!(rs.elements[1].text, "bc".to_string())
+    }
+
+    #[test]
+    fn iterating_an_empty_rich_string_yields_nothing() {
+        assert_eq!(RichString::new().iter().next(), None);
+    }
+
+    #[test]
+    fn joins_with_a_separator() {
+        let parts: [RichString; 3] = ["a".into(), "".into(), "*b*".into()];
+        assert_eq!(RichString::join(&parts, "\n"), "a\n\n*b*".into());
     }
 
     #[test]

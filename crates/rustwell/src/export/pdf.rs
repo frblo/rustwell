@@ -390,7 +390,7 @@ impl PdfExporter {
                         write_element!(slug, &MARGINS.heading, Alignment::LeftToRight);
                     }
                     Element::Action(s) => {
-                        write_element!(s, &MARGINS.action, Alignment::LeftToRight);
+                        write_element!(&s.join(), &MARGINS.action, Alignment::LeftToRight);
                     }
                     Element::Dialogue(dialogue) => {
                         let premature_exit = write_dialogue(
@@ -453,13 +453,13 @@ impl PdfExporter {
                         }
                     }
                     Element::Lyrics(s) => {
-                        write_element!(s, &MARGINS.lyrics, Alignment::LeftToRight);
+                        write_element!(&s.join(), &MARGINS.lyrics, Alignment::LeftToRight);
                     }
                     Element::Transition(s) => {
                         write_element!(s, &MARGINS.transition, Alignment::RightToLeft);
                     }
                     Element::CenteredText(s) => {
-                        write_element!(s, &MARGINS.centered, Alignment::Centered);
+                        write_element!(&s.join(), &MARGINS.centered, Alignment::Centered);
                     }
                     Element::Synopsis(s) => {
                         if self.synopses {
@@ -468,7 +468,7 @@ impl PdfExporter {
                                 opacity: NormalizedF32::new(0.5).unwrap(),
                                 rule: Default::default(),
                             }));
-                            write_element!(s, &MARGINS.synopsis, Alignment::LeftToRight);
+                            write_element!(&s.join(), &MARGINS.synopsis, Alignment::LeftToRight);
                             surface.set_fill(None);
                         }
                     }
@@ -664,17 +664,20 @@ fn write_element_custom_top_margin(
                 None => bp.index,
             }
         };
-        write_line(
-            layout_info,
-            surface,
-            left_margin,
-            (FONT_SIZE * *line_index + top_margin) as f32,
-            content,
-            start_index,
-            breakpoints.get(*breakpoint_index),
-            text_direction,
-            margin,
-        )?;
+        // An empty string (a blank line) has nothing to draw, but still takes up a line.
+        if content.char_count() > 0 {
+            write_line(
+                layout_info,
+                surface,
+                left_margin,
+                (FONT_SIZE * *line_index + top_margin) as f32,
+                content,
+                start_index,
+                breakpoints.get(*breakpoint_index),
+                text_direction,
+                margin,
+            )?;
+        }
         *breakpoint_index += 1;
         *line_index += 1;
     }
