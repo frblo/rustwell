@@ -81,6 +81,10 @@ pub fn line_col(src: &str, offset: usize) -> (usize, usize) {
 /// The components of a [`Screenplay`], like scene headings, action, dialogue, etc.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Element {
+    Section {
+        depth: u8,
+        heading: RichString,
+    },
     Heading {
         slug: RichString,
         number: Option<String>,

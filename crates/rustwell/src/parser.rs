@@ -269,9 +269,22 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Recognizes a section (`#`). Sections do not produce an element yet.
+    /// Recognizes a section (`#`, `##`, ...).
     fn section(&mut self, line: &LineView) -> bool {
-        line.trimmed.starts_with('#')
+        let rest = line.trimmed.trim_start_matches('#');
+        let hashes = line.trimmed.len() - rest.len();
+        if hashes == 0 {
+            return false;
+        }
+
+        self.elements.push(Span::new(
+            Element::Section {
+                depth: u8::try_from(hashes).unwrap_or(u8::MAX),
+                heading: RichString::from(rest.trim()),
+            },
+            line.range,
+        ));
+        true
     }
 
     fn synopsis(&mut self, line: &LineView) -> bool {
@@ -810,7 +823,7 @@ YES!",
         );
 
         test_screenplay!(
-            does_not_parse_section,
+            parses_sections,
             r"
 # Act 1
 
@@ -820,9 +833,17 @@ INT. HOUSE
 
 House is empty.",
             [
+                Element::Section {
+                    depth: 1,
+                    heading: "Act 1".into(),
+                },
                 Element::Heading {
                     slug: "INT. HOUSE".into(),
                     number: None,
+                },
+                Element::Section {
+                    depth: 2,
+                    heading: "Montage".into(),
                 },
                 Element::Action(lines(&["House is empty."]))
             ]
@@ -1177,7 +1198,7 @@ no",
                 ("~verse one\n~verse two", &["~verse one\n~verse two"]),
                 ("= A synopsis", &["= A synopsis"]),
                 ("===", &["==="]),
-                ("# A section produces no element", &[]),
+                ("# A section", &["# A section"]),
             ];
             for (src, expected) in cases {
                 assert_eq!(&element_sources(src), expected, "input: {src:?}");

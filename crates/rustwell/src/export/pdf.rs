@@ -234,7 +234,12 @@ impl PdfExporter {
         layout_info: &LayoutInfo,
         screenplay: &Screenplay,
     ) -> std::io::Result<()> {
-        let mut element_iter = screenplay.elements.iter().peekable();
+        // Sections only structure the source, they are not laid out.
+        let mut element_iter = screenplay
+            .elements
+            .iter()
+            .filter(|e| !matches!(e.inner, Element::Section { .. }))
+            .peekable();
 
         // The index for which page in the document is currently being written.
         let mut page_idx = 0;
@@ -472,6 +477,7 @@ impl PdfExporter {
                             surface.set_fill(None);
                         }
                     }
+                    Element::Section { .. } => unreachable!("sections are filtered out above"),
                     Element::PageBreak => {
                         element_iter.next();
                         break;

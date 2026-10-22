@@ -45,7 +45,11 @@ impl Exporter for HtmlExporter {
         if let Some(titlepage) = &screenplay.titlepage {
             writeln!(writer, "{}", self.export_titlepage(titlepage))?;
         }
-        for e in &screenplay.elements {
+        for e in screenplay
+            .elements
+            .iter()
+            .filter(|e| !matches!(e.inner, Element::Section { .. }))
+        {
             writeln!(writer, "{}", self.export_element(e))?;
         }
         writeln!(writer, "</div>")?;
@@ -187,6 +191,7 @@ impl HtmlExporter {
                 "synopsis",
                 format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
+            Element::Section { .. } => unreachable!("sections are skipped above"),
             Element::PageBreak => ("", String::new()), // No pagebreaks in html
         };
 
