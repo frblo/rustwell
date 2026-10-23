@@ -19,6 +19,7 @@
 //! assert!(rs.elements[2].is_bold());
 //! ```
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::{fmt::Display, str::Chars};
 
@@ -39,6 +40,8 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// Emphasis is parsed in accordance to the `CommonMark` specification.
 /// Furthermore, these can be combined in any overlapping order. Use `\` for a styling character to be
 /// ignored for style parsing.
+///
+/// A [`RichString`] will always have tabs normalized to four spaces as specified in the `Fountain` specification.
 ///
 /// # Examples
 ///
@@ -160,8 +163,8 @@ impl RichString {
     /// Pushes a string onto the [`RichString`]. Will divide the string into
     /// multiple elements with different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
-        let str = str.as_ref();
-        let (tokens, mut delimiters) = Self::tokenize(str);
+        let str = expand_tabs(str.as_ref());
+        let (tokens, mut delimiters) = Self::tokenize(&str);
         let matches = Self::match_delimiters(&mut delimiters);
         self.push_parsed(&tokens, &delimiters, &matches);
     }
@@ -577,9 +580,36 @@ struct Match {
     attrs: Attributes,
 }
 
+/// Expands each tab to four spaces, borrowing when there are none.
+fn expand_tabs(text: &str) -> Cow<'_, str> {
+    if text.contains('\t') {
+        Cow::Owned(text.replace('\t', "    "))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabs_expand_to_four_spaces() {
+        assert_eq!(RichString::from("a\tb").to_plain_string(), "a    b");
+        assert_eq!(RichString::from("\tc").to_plain_string(), "    c");
+    }
+
+    #[test]
+    fn tabs_expand_inside_styled_text() {
+        let rs: RichString = "*a\tb*".into();
+        assert_eq!(rs.to_plain_string(), "a    b");
+        assert!(rs.elements[0].is_italic());
+    }
+
+    #[test]
+    fn expand_tabs_borrows_when_there_are_none() {
+        assert!(matches!(expand_tabs("abc"), Cow::Borrowed(_)));
+    }
 
     #[test]
     fn appends_same_attributes() {

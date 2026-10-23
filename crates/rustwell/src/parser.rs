@@ -94,18 +94,20 @@ fn looks_like_character(trimmed: &str) -> bool {
     head.chars().any(char::is_alphabetic) && !head.chars().any(char::is_lowercase)
 }
 
-/// Expands tabs to four spaces, borrowing when there are none.
-fn expand_tabs(text: Cow<'_, str>) -> Cow<'_, str> {
-    if text.contains('\t') {
-        Cow::Owned(text.replace('\t', "    "))
-    } else {
-        text
-    }
+/// The width of the whitespace `text` starts with.
+fn indent_width(text: &str) -> usize {
+    text.chars()
+        .map_while(|c| match c {
+            ' ' => Some(1),
+            '\t' => Some(4),
+            _ => None,
+        })
+        .sum()
 }
 
 /// A line of the source as the parser rules see it.
 struct LineView<'t> {
-    /// The text of the line, with boneyards and notes removed and tabs expanded.
+    /// The text of the line, with boneyards and notes removed.
     raw: &'t str,
     /// `raw` with surrounding whitespace removed.
     trimmed: &'t str,
@@ -221,7 +223,7 @@ impl<'a> Parser<'a> {
                 range,
             };
 
-            if view.trimmed.is_empty() && !view.raw.starts_with("  ") {
+            if view.trimmed.is_empty() && indent_width(view.raw) < 2 {
                 self.state = State::Default;
                 continue;
             }
@@ -254,10 +256,9 @@ impl<'a> Parser<'a> {
         (self.title_page, self.elements)
     }
 
-    /// The text of `line` as the parser sees it: boneyards and notes removed and
-    /// tabs expanded.
+    /// The text of `line` as the parser sees it, boneyards and notes removed.
     fn text(&self, line: &'a LogicalLine) -> Cow<'a, str> {
-        expand_tabs(line.text(self.src))
+        line.text(self.src)
     }
 
     /// Runs `rules` in order on `line`, stopping at the first that claims it.
@@ -526,7 +527,7 @@ impl<'a> Parser<'a> {
         let mut out = Vec::new();
         while let Some(&logical) = self.lines.peek() {
             let next = self.text(logical);
-            if next.starts_with("   ") {
+            if indent_width(&next) >= 3 {
                 self.lines.next();
                 out.push(Span::new(RichString::from(next.trim()), logical.range));
             } else {
@@ -556,10 +557,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tabs_expand_to_four_spaces() {
-        assert_eq!(expand_tabs("a\tb".into()), "a    b");
-        assert_eq!(expand_tabs("\tc".into()), "    c");
-        assert!(matches!(expand_tabs("abc".into()), Cow::Borrowed(_)));
+    fn indent_width_counts_a_tab_as_four_spaces() {
+        assert_eq!(indent_width("abc"), 0);
+        assert_eq!(indent_width("  abc"), 2);
+        assert_eq!(indent_width("\tabc"), 4);
+        assert_eq!(indent_width(" \t abc"), 6);
+        assert_eq!(indent_width("\t"), 4);
+        assert_eq!(indent_width("a  "), 0);
+    }
+
+    #[test]
+    fn a_tab_in_the_text_becomes_four_spaces() {
+        let screenplay = parse("a\tb");
+        let Element::Action(lines) = &screenplay.elements[0].inner else {
+            panic!("expected action");
+        };
+        assert_eq!(lines.join().to_plain_string(), "a    b");
+    }
+
+    #[test]
+    fn a_line_with_only_a_tab_is_an_intentional_blank_line() {
+        let screenplay = parse("CHAR\nOne.\n\t\nTwo.");
+        let Element::Dialogue(dialogue) = &screenplay.elements[0].inner else {
+            panic!("expected dialogue");
+        };
+        let lines: Vec<String> = dialogue
+            .elements
+            .iter()
+            .map(|e| match &e.inner {
+                DialogueElement::Line(s) => s.to_plain_string(),
+                DialogueElement::Parenthetical(s) => s.to_plain_string(),
+            })
+            .collect();
+        assert_eq!(lines, ["One.", "", "Two."]);
+    }
+
+    #[test]
+    fn a_tab_indents_a_title_page_value() {
+        let screenplay = parse("Title:\n\tMy Movie\n\tThe Sequel\n\nAction.");
+        let title_page = screenplay.titlepage.expect("expected a title page");
+        let title: Vec<String> = title_page
+            .title
+            .iter()
+            .map(|t| t.inner.to_plain_string())
+            .collect();
+        assert_eq!(title, ["My Movie", "The Sequel"]);
     }
 
     mod end_to_end_parse {
@@ -621,6 +663,13 @@ mod tests {
 
         fn test_parse(input: &str, expected: impl IntoIterator<Item = Element>) {
             let parsed = parse(input);
+            let expected: Vec<Element> = expected.into_iter().collect();
+            assert_eq!(
+                parsed.elements.len(),
+                expected.len(),
+                "number of elements, parsed: {:?}",
+                parsed.elements
+            );
             for (Span { inner: actual, .. }, expected) in parsed.elements.iter().zip(expected) {
                 assert_eq!(without_spans(actual), expected);
             }
