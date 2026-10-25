@@ -75,14 +75,14 @@ fn starts_like_heading(trimmed: &str) -> bool {
 }
 
 /// Splits a trailing scene number (`#S.1#`) off the heading text.
-fn split_heading_number(text: &str) -> (&str, Option<String>) {
+fn split_heading_number(text: &str) -> (&str, Option<&str>) {
     if let Some(start) = text.trim_end().strip_suffix('#')
         && let Some((text, number)) = start.rsplit_once('#')
         && number
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '.')
     {
-        return (text.trim_end(), Some(number.to_string()));
+        return (text.trim_end(), Some(number));
     }
 
     (text, None)
@@ -183,7 +183,7 @@ impl Block {
     /// The lines of `element` if it is a block of this kind.
     fn lines_mut(self, element: &mut Element) -> Option<&mut Lines> {
         match (self, element) {
-            (Block::Action, Element::Action(lines))
+            (Block::Action, Element::Action { lines, .. })
             | (Block::Lyrics, Element::Lyrics(lines))
             | (Block::Centered, Element::CenteredText(lines))
             | (Block::Synopsis, Element::Synopsis(lines)) => Some(lines),
@@ -194,7 +194,10 @@ impl Block {
     /// A new element of this kind holding `lines`.
     fn element(self, lines: Lines) -> Element {
         match self {
-            Block::Action => Element::Action(lines),
+            Block::Action => Element::Action {
+                forced: false,
+                lines,
+            },
             Block::Lyrics => Element::Lyrics(lines),
             Block::Centered => Element::CenteredText(lines),
             Block::Synopsis => Element::Synopsis(lines),
@@ -357,7 +360,14 @@ impl<'a> Parser<'a> {
             return false;
         };
 
-        self.push_block_line(Block::Action, inner, line.range);
+        self.elements.push(Span::new(
+            Element::Action {
+                forced: true,
+                lines: vec![Span::new(RichString::from(inner), line.range)].into(),
+            },
+            line.range,
+        ));
+        self.state = State::InBlock;
         true
     }
 
@@ -410,10 +420,10 @@ impl<'a> Parser<'a> {
     }
 
     fn heading(&mut self, line: &LineView) -> bool {
-        let text = if let Some(forced) = forced_heading_text(line.trimmed) {
-            forced
+        let (forced, text) = if let Some(text) = forced_heading_text(line.trimmed) {
+            (true, text)
         } else if starts_like_heading(line.trimmed) && self.next_line_is_empty() {
-            line.trimmed
+            (false, line.trimmed)
         } else {
             return false;
         };
@@ -421,8 +431,10 @@ impl<'a> Parser<'a> {
         let (text, number) = split_heading_number(text);
         self.elements.push(Span::new(
             Element::Heading {
-                slug: RichString::from(text),
-                number,
+                forced,
+                text: RichString::from(text),
+                number: number
+                    .map(|number| Span::new(number.to_string(), line.source_range(number))),
             },
             line.range,
         ));
@@ -531,21 +543,24 @@ impl<'a> Parser<'a> {
     }
 
     fn transition(&mut self, line: &LineView) -> bool {
-        let text = if let Some(forced) = line.trimmed.strip_prefix('>')
+        let (forced, text) = if let Some(text) = line.trimmed.strip_prefix('>')
             && !line.trimmed.ends_with('<')
         {
-            forced
+            (true, text)
         } else if line.trimmed.ends_with("TO:")
             && !line.trimmed.chars().any(char::is_lowercase)
             && self.next_line_is_empty()
         {
-            line.trimmed
+            (false, line.trimmed)
         } else {
             return false;
         };
 
         self.elements.push(Span::new(
-            Element::Transition(RichString::from(text)),
+            Element::Transition {
+                forced,
+                text: RichString::from(text),
+            },
             line.range,
         ));
 
@@ -644,7 +659,7 @@ mod tests {
     #[test]
     fn a_tab_in_the_text_becomes_four_spaces() {
         let screenplay = parse("a\tb");
-        let Element::Action(lines) = &screenplay.elements[0].inner else {
+        let Element::Action { lines, .. } = &screenplay.elements[0].inner else {
             panic!("expected action");
         };
         assert_eq!(lines.join().to_plain_string(), "a    b");
@@ -699,6 +714,31 @@ mod tests {
             Span::new(inner, zero_span())
         }
 
+        /// An unforced heading with zeroed ranges.
+        fn heading(text: &str, number: Option<&str>) -> Element {
+            Element::Heading {
+                forced: false,
+                text: text.into(),
+                number: number.map(|number| span(number.to_string())),
+            }
+        }
+
+        /// An unforced action with the given lines and zeroed ranges.
+        fn action(texts: &[&str]) -> Element {
+            Element::Action {
+                forced: false,
+                lines: lines(texts),
+            }
+        }
+
+        /// An unforced transition.
+        fn transition(text: &str) -> Element {
+            Element::Transition {
+                forced: false,
+                text: text.into(),
+            }
+        }
+
         /// A character cue with the given name and extensions and zeroed ranges, matching what
         /// [`without_spans`] produces.
         fn cue(name: &str, extensions: &[&str]) -> Character {
@@ -745,7 +785,19 @@ mod tests {
                     primary: span(zero_dialogue(&primary.inner)),
                     dual: span(zero_dialogue(&dual.inner)),
                 },
-                Element::Action(l) => Element::Action(zero_lines(l)),
+                Element::Heading {
+                    forced,
+                    text,
+                    number,
+                } => Element::Heading {
+                    forced: *forced,
+                    text: text.clone(),
+                    number: number.as_ref().map(|n| span(n.inner.clone())),
+                },
+                Element::Action { forced, lines } => Element::Action {
+                    forced: *forced,
+                    lines: zero_lines(lines),
+                },
                 Element::Lyrics(l) => Element::Lyrics(zero_lines(l)),
                 Element::CenteredText(l) => Element::CenteredText(zero_lines(l)),
                 Element::Synopsis(l) => Element::Synopsis(zero_lines(l)),
@@ -770,32 +822,27 @@ mod tests {
         test_screenplay!(
             parses_heading_without_number,
             "InT. OUTSIDE - DAY",
-            [Element::Heading {
-                slug: "InT. OUTSIDE - DAY".into(),
-                number: None,
-            }]
+            [heading("InT. OUTSIDE - DAY", None)]
         );
 
         test_screenplay!(
             does_not_parse_heading_whitout_dot,
             "Intro music plays.",
-            [Element::Action(lines(&["Intro music plays."]))]
+            [action(&["Intro music plays."])]
         );
 
         test_screenplay!(
             parses_heading_with_number,
             "INT. OUTSIDE - DAY #S.1#",
-            [Element::Heading {
-                slug: "INT. OUTSIDE - DAY".into(),
-                number: Some("S.1".to_string()),
-            }]
+            [heading("INT. OUTSIDE - DAY", Some("S.1"))]
         );
 
         test_screenplay!(
             parses_heading_forced,
             ".OUTSIDE - DAY",
             [Element::Heading {
-                slug: "OUTSIDE - DAY".into(),
+                forced: true,
+                text: "OUTSIDE - DAY".into(),
                 number: None,
             }]
         );
@@ -804,25 +851,42 @@ mod tests {
             parses_heading_forced_with_number,
             ".OUTSIDE - DAY #S.1#",
             [Element::Heading {
-                slug: "OUTSIDE - DAY".into(),
-                number: Some("S.1".to_string()),
+                forced: true,
+                text: "OUTSIDE - DAY".into(),
+                number: Some(span("S.1".to_string())),
             }]
         );
 
         test_screenplay!(
             parses_action,
             "They look at the test output - it's all failing.",
-            [Element::Action(lines(&[
+            [action(&[
                 "They look at the test output - it's all failing."
-            ]))]
+            ])]
         );
 
         test_screenplay!(
             parses_action_forced,
             "!INT. They look at the test output - it's all failing.",
-            [Element::Action(lines(&[
-                "INT. They look at the test output - it's all failing."
-            ]))]
+            [Element::Action {
+                forced: true,
+                lines: lines(&["INT. They look at the test output - it's all failing."]),
+            }]
+        );
+
+        test_screenplay!(
+            forced_action_continues_with_plain_lines,
+            "!INT. A forced action\nand a plain line",
+            [Element::Action {
+                forced: true,
+                lines: lines(&["INT. A forced action", "and a plain line"]),
+            }]
+        );
+
+        test_screenplay!(
+            bang_after_action_is_not_forced,
+            "A plain action\n!not forced",
+            [action(&["A plain action", "!not forced"])]
         );
 
         test_screenplay!(
@@ -965,16 +1029,15 @@ YES!",
             [Element::Lyrics(lines(&["Hey ho let's go"]))]
         );
 
-        test_screenplay!(
-            parses_transition,
-            "\nCUT TO:\n",
-            [Element::Transition("CUT TO:".into())]
-        );
+        test_screenplay!(parses_transition, "\nCUT TO:\n", [transition("CUT TO:")]);
 
         test_screenplay!(
             parses_transition_forced,
             ">Camera does a spin",
-            [Element::Transition("Camera does a spin".into())]
+            [Element::Transition {
+                forced: true,
+                text: "Camera does a spin".into(),
+            }]
         );
 
         test_screenplay!(
@@ -1014,15 +1077,12 @@ House is empty.",
                     depth: 1,
                     heading: "Act 1".into(),
                 },
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
+                heading("INT. HOUSE", None),
                 Element::Section {
                     depth: 2,
                     heading: "Montage".into(),
                 },
-                Element::Action(lines(&["House is empty."]))
+                action(&["House is empty."])
             ]
         );
 
@@ -1036,19 +1096,13 @@ INT. HOUSE
 , you understand?*/
 
 House is empty.",
-            [
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action(lines(&["House is empty."]))
-            ]
+            [heading("INT. HOUSE", None), action(&["House is empty."])]
         );
 
         test_screenplay!(
             filters_out_boneyard_inlined,
             "The house is /*extremely full*/empty.",
-            [Element::Action(lines(&["The house is empty."]))]
+            [action(&["The house is empty."])]
         );
 
         test_screenplay!(
@@ -1061,10 +1115,7 @@ INT. HOUSE
 , you understand?
 
 House is empty.",
-            [Element::Heading {
-                slug: "INT. HOUSE".into(),
-                number: None,
-            }]
+            [heading("INT. HOUSE", None)]
         );
 
         test_screenplay!(
@@ -1077,19 +1128,13 @@ INT. HOUSE
 , you understand?]]
 
 House is empty.",
-            [
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action(lines(&["House is empty."]))
-            ]
+            [heading("INT. HOUSE", None), action(&["House is empty."])]
         );
 
         test_screenplay!(
             filters_out_note_inlined,
             "The house is [[should it be full?]]empty.",
-            [Element::Action(lines(&["The house is empty."]))]
+            [action(&["The house is empty."])]
         );
 
         test_screenplay!(
@@ -1101,11 +1146,8 @@ The house [[ This is a note
                 and should not be parsed
 , you understand?]]is empty.",
             [
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action(lines(&["The house is empty."]))
+                heading("INT. HOUSE", None),
+                action(&["The house is empty."])
             ]
         );
 
@@ -1113,11 +1155,8 @@ The house [[ This is a note
             filters_out_note_multiline_empty_newline,
             "INT. HOUSE\n\nThe house [[This is a note\n  \nand should not be parsed\n, you understand?]]is empty.",
             [
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action(lines(&["The house is empty."]))
+                heading("INT. HOUSE", None),
+                action(&["The house is empty."])
             ]
         );
 
@@ -1130,19 +1169,16 @@ The house [[wow
 
 no",
             [
-                Element::Heading {
-                    slug: "INT. HOUSE".into(),
-                    number: None,
-                },
-                Element::Action(lines(&["The house [[wow"])),
-                Element::Action(lines(&["no"]))
+                heading("INT. HOUSE", None),
+                action(&["The house [[wow"]),
+                action(&["no"])
             ]
         );
 
         test_screenplay!(
             not_filters_out_unended_note,
             "This is [[ not right",
-            [Element::Action(lines(&["This is [[ not right"]))]
+            [action(&["This is [[ not right"])]
         );
 
         test_screenplay!(
@@ -1218,7 +1254,7 @@ no",
             let screenplay = parse(src);
             let [
                 Span {
-                    inner: Element::Action(lines),
+                    inner: Element::Action { lines, .. },
                     ..
                 },
             ] = &screenplay.elements[..]
@@ -1241,7 +1277,7 @@ no",
                 let [Span { inner, .. }] = &screenplay.elements[..] else {
                     panic!("expected a single element for {src:?}");
                 };
-                let (Element::Action(lines)
+                let (Element::Action { lines, .. }
                 | Element::Lyrics(lines)
                 | Element::CenteredText(lines)
                 | Element::Synopsis(lines)) = inner
@@ -1286,7 +1322,7 @@ no",
             let src = "Hello [[a note]] there.";
             let screenplay = parse(src);
             assert_eq!(element_sources(src), [src]);
-            let Element::Action(lines) = &screenplay.elements[0].inner else {
+            let Element::Action { lines, .. } = &screenplay.elements[0].inner else {
                 panic!("expected action");
             };
             assert_eq!(lines.join().to_plain_string(), "Hello  there.");
@@ -1379,6 +1415,30 @@ no",
         fn name_range_stays_clear_of_a_note_before_it() {
             let src = "\n[[loud]]BOB (V.O.)\nHello.";
             assert_eq!(cue_and_name_sources(src), [("[[loud]]BOB (V.O.)", "BOB")]);
+        }
+
+        /// The source slice covered by the scene number of the first element.
+        fn number_source(src: &str) -> &str {
+            let screenplay = parse(src);
+            let Some(Span {
+                inner: Element::Heading { number, .. },
+                ..
+            }) = screenplay.elements.first()
+            else {
+                panic!("expected a heading");
+            };
+            &src[number.as_ref().expect("expected a number").span]
+        }
+
+        #[test]
+        fn heading_number_covers_the_number_only() {
+            assert_eq!(number_source("INT. ROOM - DAY #S.1#"), "S.1");
+            assert_eq!(number_source(".FORCED #12#"), "12");
+        }
+
+        #[test]
+        fn heading_number_range_accounts_for_a_note() {
+            assert_eq!(number_source("INT. ROOM [[where?]] #S.1#"), "S.1");
         }
 
         #[test]

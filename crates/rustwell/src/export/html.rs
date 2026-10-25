@@ -128,29 +128,29 @@ impl HtmlExporter {
         }
 
         let (class, content) = match &element.inner {
-            Element::Heading { slug, number } => (
+            Element::Heading { text, number, .. } => (
                 "scene-heading",
                 format!(
                     "{}{}{}",
                     if let Some(x) = number {
-                        format!(r#"<span class="scnuml">{x}</span>"#)
+                        format!(r#"<span class="scnuml">{}</span>"#, x.inner)
                     } else {
                         String::new()
                     },
-                    self.format_rich_string(slug),
+                    self.format_rich_string(text),
                     if let Some(x) = number {
                         format!(
                             r#"<span class="scnumr">{}</span>"#,
-                            Self::encode_special_html_characters(&x)
+                            Self::encode_special_html_characters(&x.inner)
                         )
                     } else {
                         String::new()
                     },
                 ),
             ),
-            Element::Action(s) => (
+            Element::Action { lines, .. } => (
                 "action",
-                format!("<p>{}</p>", self.format_rich_string(&s.join())),
+                format!("<p>{}</p>", self.format_rich_string(&lines.join())),
             ),
             Element::Dialogue(dialogue) => (
                 "dialogue",
@@ -182,7 +182,7 @@ impl HtmlExporter {
                 "lyrics",
                 format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
-            Element::Transition(s) => ("transition", self.format_rich_string(s)),
+            Element::Transition { text, .. } => ("transition", self.format_rich_string(text)),
             Element::CenteredText(s) => (
                 "action centered",
                 format!(r"<p>{}</p>", self.format_rich_string(&s.join())),

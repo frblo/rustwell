@@ -345,7 +345,7 @@ impl PdfExporter {
                 }
 
                 match &element {
-                    Element::Heading { slug, number } => {
+                    Element::Heading { text, number, .. } => {
                         if number.is_some() {
                             let initial_line_index = line_idx;
 
@@ -358,7 +358,7 @@ impl PdfExporter {
                                 right: 18.0,
                             };
 
-                            let rich_number = &number.as_ref().unwrap().into();
+                            let rich_number = &number.as_ref().unwrap().inner.as_str().into();
 
                             write_element(
                                 layout_info,
@@ -383,7 +383,7 @@ impl PdfExporter {
                             )?;
                         }
                         outline.push_child(OutlineNode::new(
-                            slug.to_plain_string(),
+                            text.to_plain_string(),
                             XyzDestination::new(
                                 page_idx,
                                 Point {
@@ -392,10 +392,10 @@ impl PdfExporter {
                                 },
                             ),
                         ));
-                        write_element!(slug, &MARGINS.heading, Alignment::LeftToRight);
+                        write_element!(text, &MARGINS.heading, Alignment::LeftToRight);
                     }
-                    Element::Action(s) => {
-                        write_element!(&s.join(), &MARGINS.action, Alignment::LeftToRight);
+                    Element::Action { lines, .. } => {
+                        write_element!(&lines.join(), &MARGINS.action, Alignment::LeftToRight);
                     }
                     Element::Dialogue(dialogue) => {
                         let premature_exit = write_dialogue(
@@ -460,8 +460,8 @@ impl PdfExporter {
                     Element::Lyrics(s) => {
                         write_element!(&s.join(), &MARGINS.lyrics, Alignment::LeftToRight);
                     }
-                    Element::Transition(s) => {
-                        write_element!(s, &MARGINS.transition, Alignment::RightToLeft);
+                    Element::Transition { text, .. } => {
+                        write_element!(text, &MARGINS.transition, Alignment::RightToLeft);
                     }
                     Element::CenteredText(s) => {
                         write_element!(&s.join(), &MARGINS.centered, Alignment::Centered);

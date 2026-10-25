@@ -86,17 +86,29 @@ pub enum Element {
         heading: RichString,
     },
     Heading {
-        slug: RichString,
-        number: Option<String>,
+        /// Written with a leading `.`.
+        forced: bool,
+        /// The heading text, without the leading `.` and the trailing scene number.
+        text: RichString,
+        /// The scene number between the `#`s. The range covers the number, not the `#`s.
+        number: Option<Span<String>>,
     },
-    Action(Lines),
+    Action {
+        /// Written with a leading `!`, which only the first line can have.
+        forced: bool,
+        lines: Lines,
+    },
     Dialogue(Dialogue),
     DualDialogue {
         primary: Span<Dialogue>,
         dual: Span<Dialogue>,
     },
     Lyrics(Lines),
-    Transition(RichString),
+    Transition {
+        /// Written with a leading `>`.
+        forced: bool,
+        text: RichString,
+    },
     CenteredText(Lines),
     Synopsis(Lines),
     PageBreak,
