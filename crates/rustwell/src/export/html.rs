@@ -160,7 +160,7 @@ impl HtmlExporter {
                     self.format_dialogue(&dialogue.elements),
                 ),
             ),
-            Element::DualDialogue(dialogue1, dialogue2) => (
+            Element::DualDialogue { primary, dual } => (
                 "dual",
                 format!(
                     r#"
@@ -172,10 +172,10 @@ impl HtmlExporter {
                     <p class="character">{}</p>
                     {}
                 </div>"#,
-                    self.format_character(dialogue1),
-                    self.format_dialogue(&dialogue1.elements),
-                    self.format_character(dialogue2),
-                    self.format_dialogue(&dialogue2.elements),
+                    self.format_character(&primary.inner),
+                    self.format_dialogue(&primary.inner.elements),
+                    self.format_character(&dual.inner),
+                    self.format_dialogue(&dual.inner.elements),
                 ),
             ),
             Element::Lyrics(s) => (
@@ -204,15 +204,12 @@ impl HtmlExporter {
     }
 
     fn format_character(&self, dialogue: &Dialogue) -> String {
-        if let Some(extension) = &dialogue.extension {
-            format!(
-                "{} ({})",
-                self.format_rich_string(&dialogue.character),
-                self.format_rich_string(extension)
-            )
-        } else {
-            self.format_rich_string(&dialogue.character)
+        let character = &dialogue.character.inner;
+        let mut formatted = self.format_rich_string(&character.name.inner);
+        if let Some(extension) = character.extensions.first() {
+            formatted.push_str(&format!(" ({})", self.format_rich_string(&extension.inner)));
         }
+        formatted
     }
 
     /// Formats a [`RichString`] into a `html`-[String].

@@ -412,7 +412,7 @@ impl PdfExporter {
                             break;
                         }
                     }
-                    Element::DualDialogue(dialogue0, dialogue1) => {
+                    Element::DualDialogue { primary, dual } => {
                         let mut initial_line_index = line_idx;
                         let mut premature_exit = false;
                         // Ensures dual dialogue is only written it either both have not been
@@ -424,7 +424,7 @@ impl PdfExporter {
                             premature_exit = premature_exit
                                 || write_dialogue(
                                     layout_info,
-                                    dialogue0,
+                                    &primary.inner,
                                     &mut residual_dual_dialogue_idx.0,
                                     &mut residual_dual_breakpoint_idx.0,
                                     max_lines_per_page,
@@ -440,7 +440,7 @@ impl PdfExporter {
                             premature_exit = premature_exit
                                 || write_dialogue(
                                     layout_info,
-                                    dialogue1,
+                                    &dual.inner,
                                     &mut residual_dual_dialogue_idx.1,
                                     &mut residual_dual_breakpoint_idx.1,
                                     max_lines_per_page,
@@ -517,18 +517,15 @@ fn write_dialogue(
     surface: &mut Surface,
     dialogue_margins: &DialogueMargins,
 ) -> std::io::Result<bool> {
-    let mut character_name = dialogue.character.clone();
-    match (*residual_dialogue, &dialogue.extension) {
-        (Some(_), _) => {
-            character_name.append(" (CONT'D)".into());
-        }
-        (None, Some(ext)) => {
-            character_name.append(" (".into());
-            character_name.append(ext.clone());
-            character_name.append(")".into());
-        }
-        _ => (),
-    };
+    let character = &dialogue.character.inner;
+    let mut character_name = character.name.inner.clone();
+    if residual_dialogue.is_some() {
+        character_name.append(" (CONT'D)".into());
+    } else if let Some(extension) = character.extensions.first() {
+        character_name.append(" (".into());
+        character_name.append(extension.inner.clone());
+        character_name.append(")".into());
+    }
     let span = glyph_span(
         layout_info.size,
         dialogue_margins.character.left,

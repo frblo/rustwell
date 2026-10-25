@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 
 use crate::rich_string::RichString;
+use crate::screenplay::Character;
 use crate::screenplay::Dialogue;
 use crate::screenplay::DialogueElement;
 use crate::screenplay::Element;
@@ -105,6 +106,42 @@ fn indent_width(text: &str) -> usize {
         .sum()
 }
 
+/// Parses the character cue `cue`, the text of the cue line without a leading `@` when `forced`.
+///
+/// A trailing `^` is the caret. The name is what comes before the first `(`, followed by every
+/// parenthesized extension. A `(` that is never closed is part of the name.
+fn parse_character(line: &LineView, forced: bool, cue: &str) -> Character {
+    let (cue, caret) = match cue.trim_end().strip_suffix('^') {
+        Some(rest) => (rest.trim_end(), true),
+        None => (cue, false),
+    };
+
+    let mut extensions = Vec::new();
+    let name = match cue.split_once('(') {
+        Some((name, mut rest)) if rest.contains(')') => {
+            while let Some((extension, after)) = rest.split_once(')') {
+                extensions.push(Span::new(
+                    RichString::from(extension),
+                    line.source_range(extension),
+                ));
+                match after.split_once('(') {
+                    Some((_, next)) => rest = next,
+                    None => break,
+                }
+            }
+            name.trim_end()
+        }
+        _ => cue,
+    };
+
+    Character {
+        forced,
+        name: Span::new(RichString::from(name), line.source_range(name)),
+        extensions,
+        caret,
+    }
+}
+
 /// A line of the source as the parser rules see it.
 struct LineView<'t> {
     /// The text of the line, with boneyards and notes removed.
@@ -113,6 +150,24 @@ struct LineView<'t> {
     trimmed: &'t str,
     /// The byte range of the line in the source.
     range: SourceRange,
+    /// The line as the scanner split it, which `raw` was made from.
+    logical: &'t LogicalLine,
+}
+
+impl LineView<'_> {
+    /// The range in the source of `piece`, which must be a substring of `raw`.
+    ///
+    /// `raw` has its notes and boneyards removed, so the position of `piece` in it is not an
+    /// offset in the source. This maps it back.
+    fn source_range(&self, piece: &str) -> SourceRange {
+        let start = piece.as_ptr() as usize - self.raw.as_ptr() as usize;
+        debug_assert!(
+            start + piece.len() <= self.raw.len(),
+            "`piece` is not in `raw`"
+        );
+        self.logical
+            .source_range(SourceRange::from(start..start + piece.len()))
+    }
 }
 
 /// The kinds of element made of consecutive lines.
@@ -179,6 +234,9 @@ const DEFAULT_RULES: &[Rule] = rules![
     action,
 ];
 
+/// The rules for a line inside a dialogue, after its character cue.
+const IN_DIALOGUE_RULES: &[Rule] = rules![parenthetical, dialogue_line,];
+
 /// The rules for a line directly after centered text, lyrics, a synopsis or action.
 const IN_BLOCK_RULES: &[Rule] = rules![centered, lyrics, synopsis, action];
 
@@ -221,6 +279,7 @@ impl<'a> Parser<'a> {
                 raw: &line,
                 trimmed: line.trim(),
                 range,
+                logical,
             };
 
             if view.trimmed.is_empty() && indent_width(view.raw) < 2 {
@@ -230,25 +289,7 @@ impl<'a> Parser<'a> {
 
             match self.state {
                 State::Default => self.apply_rules(DEFAULT_RULES, &view),
-                State::InDialogue => {
-                    let (curr_dialogue, element_span) = self
-                        .get_last_dialogue()
-                        .expect("Must exist since we are in dialogue block");
-                    element_span.end = view.range.end;
-
-                    if view.trimmed.starts_with('(') && view.trimmed.ends_with(')') {
-                        curr_dialogue.elements.push(Span::new(
-                            DialogueElement::Parenthetical(RichString::from(view.trimmed)),
-                            view.range,
-                        ));
-                        continue;
-                    }
-
-                    curr_dialogue.elements.push(Span::new(
-                        DialogueElement::Line(RichString::from(view.trimmed)),
-                        view.range,
-                    ));
-                }
+                State::InDialogue => self.apply_rules(IN_DIALOGUE_RULES, &view),
                 State::InBlock => self.apply_rules(IN_BLOCK_RULES, &view),
             }
         }
@@ -390,68 +431,102 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn get_last_dialogue(&mut self) -> Option<(&mut Dialogue, &mut SourceRange)> {
-        let Some(Span {
-            span,
-            inner: Element::Dialogue(curr_dialogue) | Element::DualDialogue(_, curr_dialogue),
-        }) = self.elements.last_mut()
-        else {
-            return None;
-        };
-
-        Some((curr_dialogue, span))
+    /// Extends the last dialogue, the second half if it is a dual dialogue, and the element
+    /// holding it to end at `end`. Returns the dialogue.
+    ///
+    /// # Panics
+    /// If the last element is not a dialogue, which the parser state rules out.
+    fn extend_last_dialogue(&mut self, end: usize) -> &mut Dialogue {
+        match self.elements.last_mut() {
+            Some(Span {
+                span,
+                inner: Element::Dialogue(dialogue),
+            }) => {
+                span.end = end;
+                dialogue
+            }
+            Some(Span {
+                span,
+                inner: Element::DualDialogue { dual, .. },
+            }) => {
+                span.end = end;
+                dual.span.end = end;
+                &mut dual.inner
+            }
+            _ => unreachable!("Must exist since we are in dialogue block"),
+        }
     }
 
-    fn insert_empty_dialogue<'s>(&mut self, inner: &'s str, range: SourceRange) -> &'s str {
-        let new_dialogue = Dialogue::new();
+    /// Starts a dialogue with `character`.
+    ///
+    /// If the character has a caret and the previous element is a dialogue a
+    /// `DualDialogue` is created.
+    fn push_dialogue(&mut self, character: Span<Character>, range: SourceRange) {
+        let dialogue = Dialogue {
+            character,
+            elements: Vec::new(),
+        };
 
-        if let Some(stripped) = inner.trim_end().strip_suffix('^')
-            && let Some(&Span {
-                inner: Element::Dialogue(_),
-                ..
-            }) = self.elements.last()
+        if dialogue.character.inner.caret
             && let Some(Span {
                 span,
-                inner: Element::Dialogue(d),
-            }) = self.elements.pop()
+                inner: Element::Dialogue(primary),
+            }) = self
+                .elements
+                .pop_if(|e| matches!(e.inner, Element::Dialogue(_)))
         {
             self.elements.push(Span::new(
-                Element::DualDialogue(d, new_dialogue),
+                Element::DualDialogue {
+                    primary: Span::new(primary, span),
+                    dual: Span::new(dialogue, range),
+                },
                 SourceRange::from(span.start..range.end),
             ));
-            return stripped.trim_end();
+            return;
         }
 
         self.elements
-            .push(Span::new(Element::Dialogue(new_dialogue), range));
-        inner
+            .push(Span::new(Element::Dialogue(dialogue), range));
     }
 
     fn dialogue_start(&mut self, line: &LineView) -> bool {
-        let character = if let Some(forced) = line.trimmed.strip_prefix('@') {
-            forced
+        let (forced, cue) = if let Some(cue) = line.trimmed.strip_prefix('@') {
+            (true, cue)
         } else if looks_like_character(line.trimmed) && !self.next_line_is_empty() {
-            line.trimmed
+            (false, line.trimmed)
         } else {
             return false;
         };
 
-        let mut character = self.insert_empty_dialogue(character, line.range);
-
-        let (curr_dialogue, _) = self
-            .get_last_dialogue()
-            .expect("Just pushed to list, must exist");
-
-        if let Some((head, tail)) = character.split_once('(')
-            && let Some((extension, _)) = tail.split_once(')')
-        {
-            curr_dialogue.extension = Some(RichString::from(extension));
-            character = head.trim_end();
-        }
-
-        curr_dialogue.character = RichString::from(character);
+        let character = Span::new(parse_character(line, forced, cue), line.range);
+        self.push_dialogue(character, line.range);
 
         self.state = State::InDialogue;
+        true
+    }
+
+    /// Recognizes a line wrapped in parentheses.
+    fn parenthetical(&mut self, line: &LineView) -> bool {
+        if !(line.trimmed.starts_with('(') && line.trimmed.ends_with(')')) {
+            return false;
+        }
+
+        self.extend_last_dialogue(line.range.end)
+            .elements
+            .push(Span::new(
+                DialogueElement::Parenthetical(RichString::from(line.trimmed)),
+                line.range,
+            ));
+        true
+    }
+
+    fn dialogue_line(&mut self, line: &LineView) -> bool {
+        self.extend_last_dialogue(line.range.end)
+            .elements
+            .push(Span::new(
+                DialogueElement::Line(RichString::from(line.trimmed)),
+                line.range,
+            ));
         true
     }
 
@@ -624,6 +699,17 @@ mod tests {
             Span::new(inner, zero_span())
         }
 
+        /// A character cue with the given name and extensions and zeroed ranges, matching what
+        /// [`without_spans`] produces.
+        fn cue(name: &str, extensions: &[&str]) -> Character {
+            Character {
+                forced: false,
+                name: span(name.into()),
+                extensions: extensions.iter().map(|e| span((*e).into())).collect(),
+                caret: false,
+            }
+        }
+
         /// Lines with the given text and zeroed ranges.
         fn lines(texts: &[&str]) -> Lines {
             texts
@@ -637,6 +723,11 @@ mod tests {
         fn without_spans(element: &Element) -> Element {
             let zero_dialogue = |d: &Dialogue| {
                 let mut d = d.clone();
+                d.character.span = zero_span();
+                d.character.inner.name.span = zero_span();
+                for e in &mut d.character.inner.extensions {
+                    e.span = zero_span();
+                }
                 for e in &mut d.elements {
                     e.span = zero_span();
                 }
@@ -650,9 +741,10 @@ mod tests {
             };
             match element {
                 Element::Dialogue(d) => Element::Dialogue(zero_dialogue(d)),
-                Element::DualDialogue(l, r) => {
-                    Element::DualDialogue(zero_dialogue(l), zero_dialogue(r))
-                }
+                Element::DualDialogue { primary, dual } => Element::DualDialogue {
+                    primary: span(zero_dialogue(&primary.inner)),
+                    dual: span(zero_dialogue(&dual.inner)),
+                },
                 Element::Action(l) => Element::Action(zero_lines(l)),
                 Element::Lyrics(l) => Element::Lyrics(zero_lines(l)),
                 Element::CenteredText(l) => Element::CenteredText(zero_lines(l)),
@@ -742,8 +834,7 @@ Nooo!
 (angry)
 I am angry.",
             [Element::Dialogue(Dialogue {
-                character: "CHAR".into(),
-                extension: None,
+                character: span(cue("CHAR", &[])),
                 elements: vec![
                     span(DialogueElement::Parenthetical("(sad)".into())),
                     span(DialogueElement::Line("Nooo!".into())),
@@ -760,8 +851,7 @@ CHAR (V.O)
 (sad)
 Nooo!",
             [Element::Dialogue(Dialogue {
-                character: "CHAR".into(),
-                extension: Some("V.O".into()),
+                character: span(cue("CHAR", &["V.O"])),
                 elements: vec![
                     span(DialogueElement::Parenthetical("(sad)".into())),
                     span(DialogueElement::Line("Nooo!".into())),
@@ -778,8 +868,10 @@ Nooo!
 (angry)
 I am angry.",
             [Element::Dialogue(Dialogue {
-                character: "char".into(),
-                extension: None,
+                character: span(Character {
+                    forced: true,
+                    ..cue("char", &[])
+                }),
                 elements: vec![
                     span(DialogueElement::Parenthetical("(sad)".into())),
                     span(DialogueElement::Line("Nooo!".into())),
@@ -796,8 +888,10 @@ I am angry.",
 (sad)
 Nooo!",
             [Element::Dialogue(Dialogue {
-                character: "char".into(),
-                extension: Some("V.O".into()),
+                character: span(Character {
+                    forced: true,
+                    ..cue("char", &["V.O"])
+                }),
                 elements: vec![
                     span(DialogueElement::Parenthetical("(sad)".into())),
                     span(DialogueElement::Line("Nooo!".into())),
@@ -814,21 +908,55 @@ Nooo!
 
 CHOR (V.O) ^
 YES!",
-            [Element::DualDialogue(
-                Dialogue {
-                    character: "CHaR".into(),
-                    extension: None,
+            [Element::DualDialogue {
+                primary: span(Dialogue {
+                    character: span(Character {
+                        forced: true,
+                        ..cue("CHaR", &[])
+                    }),
                     elements: vec![
                         span(DialogueElement::Parenthetical("(sad)".into())),
                         span(DialogueElement::Line("Nooo!".into())),
                     ],
-                },
-                Dialogue {
-                    character: "CHOR".into(),
-                    extension: Some("V.O".into()),
+                }),
+                dual: span(Dialogue {
+                    character: span(Character {
+                        caret: true,
+                        ..cue("CHOR", &["V.O"])
+                    }),
                     elements: vec![span(DialogueElement::Line("YES!".into()))],
-                },
-            )]
+                }),
+            }]
+        );
+
+        test_screenplay!(
+            parses_dialogue_with_several_extensions,
+            "\nBOB (V.O.) (CONT'D)\nHello.",
+            [Element::Dialogue(Dialogue {
+                character: span(cue("BOB", &["V.O.", "CONT'D"])),
+                elements: vec![span(DialogueElement::Line("Hello.".into()))],
+            })]
+        );
+
+        test_screenplay!(
+            keeps_a_caret_with_nothing_to_pair_with,
+            "\nBOB ^\nHello.",
+            [Element::Dialogue(Dialogue {
+                character: span(Character {
+                    caret: true,
+                    ..cue("BOB", &[])
+                }),
+                elements: vec![span(DialogueElement::Line("Hello.".into()))],
+            })]
+        );
+
+        test_screenplay!(
+            keeps_an_unclosed_parenthesis_in_the_name,
+            "\nBOB (V.O.\nHello.",
+            [Element::Dialogue(Dialogue {
+                character: span(cue("BOB (V.O.", &[])),
+                elements: vec![span(DialogueElement::Line("Hello.".into()))],
+            })]
         );
 
         test_screenplay!(
@@ -1021,8 +1149,7 @@ no",
             parenthetical_must_be_closed,
             "NAME\n(This is dialogue",
             [Element::Dialogue(Dialogue {
-                character: "NAME".into(),
-                extension: None,
+                character: span(cue("NAME", &[])),
                 elements: vec![span(DialogueElement::Line("(This is dialogue".into()))]
             })]
         );
@@ -1031,8 +1158,7 @@ no",
             dialogue_with_whiteline_in_middle,
             "NAME\nThis dialogue should visibly have a line below it.\n  \nVisually separating it from this line, due to the two spaces at the start of the previous line.",
             [Element::Dialogue(Dialogue {
-                character: "NAME".into(),
-                extension: None,
+                character: span(cue("NAME", &[])),
                 elements: vec![
                     span(DialogueElement::Line("This dialogue should visibly have a line below it.".into())),
                     span(DialogueElement::Line("".into())),
@@ -1062,7 +1188,9 @@ no",
             let screenplay = parse(src);
             let speakers = screenplay.elements.iter().flat_map(|e| match &e.inner {
                 Element::Dialogue(d) => vec![d],
-                Element::DualDialogue(left, right) => vec![left, right],
+                Element::DualDialogue { primary, dual } => {
+                    vec![&primary.inner, &dual.inner]
+                }
                 _ => vec![],
             });
             speakers.map(|d| sources(src, &d.elements)).collect()
@@ -1196,6 +1324,131 @@ no",
                 dialogue_part_sources(src),
                 [["First line.", "Second line."]]
             );
+        }
+
+        /// The source slice covered by each extension of the first speaker.
+        fn extension_sources(src: &str) -> Vec<&str> {
+            let screenplay = parse(src);
+            let Some(Span {
+                inner: Element::Dialogue(dialogue),
+                ..
+            }) = screenplay.elements.first()
+            else {
+                panic!("expected a dialogue");
+            };
+            sources(src, &dialogue.character.inner.extensions)
+        }
+
+        /// The source slice covered by the cue and by the name of each speaker, in order.
+        fn cue_and_name_sources(src: &str) -> Vec<(&str, &str)> {
+            let screenplay = parse(src);
+            let speakers = screenplay.elements.iter().flat_map(|e| match &e.inner {
+                Element::Dialogue(d) => vec![d],
+                Element::DualDialogue { primary, dual } => {
+                    vec![&primary.inner, &dual.inner]
+                }
+                _ => vec![],
+            });
+            speakers
+                .map(|d| (&src[d.character.span], &src[d.character.inner.name.span]))
+                .collect()
+        }
+
+        #[test]
+        fn cue_covers_the_whole_line_and_name_only_the_name() {
+            let src = "\nBOB (V.O.) (CONT'D)\nHello.";
+            assert_eq!(cue_and_name_sources(src), [("BOB (V.O.) (CONT'D)", "BOB")]);
+        }
+
+        #[test]
+        fn cue_includes_the_at_sign_and_name_excludes_it() {
+            let src = "\n@bob (V.O.)\nHello.";
+            assert_eq!(cue_and_name_sources(src), [("@bob (V.O.)", "bob")]);
+        }
+
+        #[test]
+        fn cue_includes_the_caret_and_name_excludes_it() {
+            let src = "\nALICE\nHi there.\n\nBOB ^\nHello.";
+            assert_eq!(
+                cue_and_name_sources(src),
+                [("ALICE", "ALICE"), ("BOB ^", "BOB")]
+            );
+        }
+
+        #[test]
+        fn name_range_stays_clear_of_a_note_before_it() {
+            let src = "\n[[loud]]BOB (V.O.)\nHello.";
+            assert_eq!(cue_and_name_sources(src), [("[[loud]]BOB (V.O.)", "BOB")]);
+        }
+
+        #[test]
+        fn extensions_cover_the_text_inside_the_parentheses() {
+            let src = "\nBOB (V.O.) (CONT'D)\nHello.";
+            assert_eq!(extension_sources(src), ["V.O.", "CONT'D"]);
+        }
+
+        #[test]
+        fn extension_ranges_account_for_a_note_in_the_cue() {
+            let src = "\nBOB [[loud]] (V.O.)\nHello.";
+            assert_eq!(extension_sources(src), ["V.O."]);
+        }
+
+        #[test]
+        fn extension_ranges_account_for_a_boneyard_in_the_cue() {
+            let src = "\nBOB /* x */(V.O.) /* y */(CONT'D)\nHello.";
+            assert_eq!(extension_sources(src), ["V.O.", "CONT'D"]);
+        }
+
+        #[test]
+        fn extension_ranges_account_for_tabs_in_the_cue() {
+            let src = "\n\tBOB\t(V.O.)\t(CONT'D)\nHello.";
+            assert_eq!(extension_sources(src), ["V.O.", "CONT'D"]);
+        }
+
+        #[test]
+        fn extension_ranges_account_for_multibyte_names() {
+            let src = "\nÅSA (V.O.)\nHello.";
+            assert_eq!(extension_sources(src), ["V.O."]);
+        }
+
+        #[test]
+        fn dual_dialogue_halves_have_their_own_ranges() {
+            let src = "\nALICE\n(smiling)\nHi there.\n\nBOB ^\nHello.\nAgain.";
+            let screenplay = parse(src);
+            let [
+                Span {
+                    inner: Element::DualDialogue { primary, dual },
+                    span,
+                },
+            ] = &screenplay.elements[..]
+            else {
+                panic!("expected a single dual dialogue");
+            };
+            assert_eq!(&src[*span], &src[1..]);
+            assert_eq!(&src[primary.span], "ALICE\n(smiling)\nHi there.");
+            assert_eq!(&src[dual.span], "BOB ^\nHello.\nAgain.");
+        }
+
+        #[test]
+        fn a_third_caret_in_a_row_is_a_plain_dialogue() {
+            let src = "\nALICE\nHi.\n\nBOB ^\nHello.\n\nCAROL ^\nHey.";
+            let screenplay = parse(src);
+            let [
+                Span {
+                    inner: Element::DualDialogue { .. },
+                    span: dual_span,
+                },
+                Span {
+                    inner: Element::Dialogue(carol),
+                    span: carol_span,
+                },
+            ] = &screenplay.elements[..]
+            else {
+                panic!("expected a dual dialogue and a dialogue");
+            };
+            assert_eq!(&src[*dual_span], "ALICE\nHi.\n\nBOB ^\nHello.");
+            assert_eq!(&src[*carol_span], "CAROL ^\nHey.");
+            assert!(carol.character.inner.caret);
         }
 
         #[test]

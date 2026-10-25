@@ -91,7 +91,10 @@ pub enum Element {
     },
     Action(Lines),
     Dialogue(Dialogue),
-    DualDialogue(Dialogue, Dialogue),
+    DualDialogue {
+        primary: Span<Dialogue>,
+        dual: Span<Dialogue>,
+    },
     Lyrics(Lines),
     Transition(RichString),
     CenteredText(Lines),
@@ -153,7 +156,7 @@ impl<'a> IntoIterator for &'a Lines {
     }
 }
 
-/// Dialogue consisting of a character name, an extension, parentheticals and lines.
+/// Dialogue consisting of a character cue, parentheticals and lines.
 /// A single [Dialogue] can have multiple parentheticals and lines.
 ///
 /// NAME (extension)
@@ -161,26 +164,27 @@ impl<'a> IntoIterator for &'a Lines {
 /// Line.
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub struct Dialogue {
-    pub character: RichString,
-    pub extension: Option<RichString>,
+    pub character: Span<Character>,
     pub elements: Vec<Span<DialogueElement>>,
 }
 
-impl Dialogue {
-    /// Creates an empty [Dialogue].
-    pub fn new() -> Self {
-        Self {
-            character: RichString::new(),
-            extension: None,
-            elements: Vec::new(),
-        }
-    }
-}
-
-impl Default for Dialogue {
-    fn default() -> Self {
-        Self::new()
-    }
+/// The character cue line of a [`Dialogue`].
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct Character {
+    /// Written with a leading `@`.
+    pub forced: bool,
+    /// The name. The range covers the name only, without the `@`, the extensions and the `^`.
+    pub name: Span<RichString>,
+    /// Every parenthesized extension, in order: `BOB (V.O.) (CONT'D)` has two.
+    /// The range covers the text inside the parentheses.
+    ///
+    /// Typically only one will be display but we collect all for continuity.
+    pub extensions: Vec<Span<RichString>>,
+    /// The cue ends with `^`, which asks for the speech to be shown next to the one before it.
+    ///
+    /// True for the second half of an [`Element::DualDialogue`]. A `^` with nothing to pair with
+    /// (the first speaker, or a third in a row) is kept as a plain [`Element::Dialogue`].
+    pub caret: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

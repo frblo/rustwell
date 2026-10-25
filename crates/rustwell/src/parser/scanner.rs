@@ -58,6 +58,36 @@ impl LogicalLine {
     }
 }
 
+impl LogicalLine {
+    /// The range in the source corresponding to the byte range of some visible text.
+    ///
+    /// The visible text has its notes and boneyards removed, so an offset into it is only an
+    /// offset into the source up to the first removed fragment. This translates other ranges into
+    /// their source positions.
+    ///
+    /// A range that sits next to or between removed fragments includes only the visible parts of it, but a range that spans a fragment includes it.
+    pub fn source_range(&self, text: Range<usize>) -> Span {
+        Span::from(self.source_offset(text.start, false)..self.source_offset(text.end, true))
+    }
+
+    /// The source offset of a byte offset in the visible text. An offset at the seam between two
+    /// text pieces is the start of the next piece for a range start, and the end of the previous
+    /// piece for a range end (`is_end`).
+    fn source_offset(&self, mut offset: usize, is_end: bool) -> usize {
+        for segment in &self.segments {
+            let Segment::Text(span) = segment else {
+                continue;
+            };
+            let len = span.end - span.start;
+            if offset < len || (is_end && offset == len) {
+                return span.start + offset;
+            }
+            offset -= len;
+        }
+        self.range.end
+    }
+}
+
 /// A slice of a [`LogicalLine`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
@@ -507,6 +537,57 @@ mod tests {
             "/* boneyard */\n[[a note]]\nWorld",
             &[(1, ""), (2, ""), (3, "World")],
         );
+    }
+
+    /// The source slices that the given ranges of the visible text of the first line map to.
+    fn mapped<'s>(src: &'s str, texts: &[Range<usize>]) -> Vec<&'s str> {
+        let line = &scan(src).lines[0];
+        texts
+            .iter()
+            .map(|text| &src[line.source_range(*text)])
+            .collect()
+    }
+
+    #[test]
+    fn source_range_of_a_clean_line_is_the_text_range() {
+        assert_eq!(mapped("BOB (V.O.)", &[Range::from(5..9)]), ["V.O."]);
+    }
+
+    #[test]
+    fn source_range_skips_a_note_before_the_text() {
+        // The visible text is "BOB  (V.O.)".
+        let src = "BOB [[loud]] (V.O.)";
+        assert_eq!(mapped(src, &[Range::from(6..10)]), ["V.O."]);
+    }
+
+    #[test]
+    fn source_range_skips_a_boneyard_before_the_text() {
+        // The visible text is "BOB (V.O.)".
+        let src = "BOB /* x */(V.O.)";
+        assert_eq!(mapped(src, &[Range::from(5..9)]), ["V.O."]);
+    }
+
+    #[test]
+    fn source_range_stays_on_the_text_side_of_a_seam() {
+        // The visible text is "ab", with the note between the two letters.
+        let src = "a[[n]]b";
+        assert_eq!(
+            mapped(src, &[Range::from(0..1), Range::from(1..2)]),
+            ["a", "b"]
+        );
+    }
+
+    #[test]
+    fn source_range_spanning_a_removed_fragment_includes_it() {
+        let src = "a[[n]]b";
+        assert_eq!(mapped(src, &[Range::from(0..2)]), [src]);
+    }
+
+    #[test]
+    fn source_range_works_across_fused_lines() {
+        // The boneyard fuses both physical lines, the visible text is "ab".
+        let src = "a/* x\ny */b";
+        assert_eq!(mapped(src, &[Range::from(1..2)]), ["b"]);
     }
 
     #[test]
