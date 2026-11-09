@@ -325,7 +325,10 @@ impl<'a> Parser<'a> {
         self.elements.push(Span::new(
             Element::Section {
                 depth: u8::try_from(hashes).unwrap_or(u8::MAX),
-                heading: RichString::from(rest.trim()),
+                heading: Span::new(
+                    RichString::from(rest.trim()),
+                    line.source_range(rest.trim()),
+                ),
             },
             line.range,
         ));
@@ -432,7 +435,7 @@ impl<'a> Parser<'a> {
         self.elements.push(Span::new(
             Element::Heading {
                 forced,
-                text: RichString::from(text),
+                text: Span::new(RichString::from(text), line.source_range(text)),
                 number: number
                     .map(|number| Span::new(number.to_string(), line.source_range(number))),
             },
@@ -559,7 +562,7 @@ impl<'a> Parser<'a> {
         self.elements.push(Span::new(
             Element::Transition {
                 forced,
-                text: RichString::from(text),
+                text: Span::new(RichString::from(text), line.source_range(text)),
             },
             line.range,
         ));
@@ -718,7 +721,7 @@ mod tests {
         fn heading(text: &str, number: Option<&str>) -> Element {
             Element::Heading {
                 forced: false,
-                text: text.into(),
+                text: span(text.into()),
                 number: number.map(|number| span(number.to_string())),
             }
         }
@@ -735,7 +738,7 @@ mod tests {
         fn transition(text: &str) -> Element {
             Element::Transition {
                 forced: false,
-                text: text.into(),
+                text: span(text.into()),
             }
         }
 
@@ -791,8 +794,16 @@ mod tests {
                     number,
                 } => Element::Heading {
                     forced: *forced,
-                    text: text.clone(),
+                    text: span(text.inner.clone()),
                     number: number.as_ref().map(|n| span(n.inner.clone())),
+                },
+                Element::Transition { forced, text } => Element::Transition {
+                    forced: *forced,
+                    text: span(text.inner.clone()),
+                },
+                Element::Section { depth, heading } => Element::Section {
+                    depth: *depth,
+                    heading: span(heading.inner.clone()),
                 },
                 Element::Action { forced, lines } => Element::Action {
                     forced: *forced,
@@ -842,7 +853,7 @@ mod tests {
             ".OUTSIDE - DAY",
             [Element::Heading {
                 forced: true,
-                text: "OUTSIDE - DAY".into(),
+                text: span("OUTSIDE - DAY".into()),
                 number: None,
             }]
         );
@@ -852,7 +863,7 @@ mod tests {
             ".OUTSIDE - DAY #S.1#",
             [Element::Heading {
                 forced: true,
-                text: "OUTSIDE - DAY".into(),
+                text: span("OUTSIDE - DAY".into()),
                 number: Some(span("S.1".to_string())),
             }]
         );
@@ -1036,7 +1047,7 @@ YES!",
             ">Camera does a spin",
             [Element::Transition {
                 forced: true,
-                text: "Camera does a spin".into(),
+                text: span("Camera does a spin".into()),
             }]
         );
 
@@ -1075,12 +1086,12 @@ House is empty.",
             [
                 Element::Section {
                     depth: 1,
-                    heading: "Act 1".into(),
+                    heading: span("Act 1".into()),
                 },
                 heading("INT. HOUSE", None),
                 Element::Section {
                     depth: 2,
-                    heading: "Montage".into(),
+                    heading: span("Montage".into()),
                 },
                 action(&["House is empty."])
             ]
@@ -1428,6 +1439,44 @@ no",
                 panic!("expected a heading");
             };
             &src[number.as_ref().expect("expected a number").span]
+        }
+
+        /// The source slice covered by the text of the first element, which is a heading,
+        /// a transition or a section.
+        fn text_source(src: &str) -> &str {
+            let screenplay = parse(src);
+            let Some(Span { inner, .. }) = screenplay.elements.first() else {
+                panic!("expected an element");
+            };
+            match inner {
+                Element::Heading { text, .. } | Element::Transition { text, .. } => &src[text.span],
+                Element::Section { heading, .. } => &src[heading.span],
+                _ => panic!("expected a heading, transition or section"),
+            }
+        }
+
+        #[test]
+        fn heading_text_leaves_out_the_marker_and_the_number() {
+            assert_eq!(text_source("INT. ROOM - DAY #S.1#"), "INT. ROOM - DAY");
+            assert_eq!(text_source(".FORCED #12#"), "FORCED");
+            assert_eq!(text_source(".FORCED"), "FORCED");
+        }
+
+        #[test]
+        fn heading_text_range_accounts_for_a_note() {
+            assert_eq!(text_source("[[x]]INT. ROOM - DAY"), "INT. ROOM - DAY");
+        }
+
+        #[test]
+        fn transition_text_leaves_out_the_marker() {
+            assert_eq!(text_source("\nCUT TO:\n"), "CUT TO:");
+            assert_eq!(text_source(">Camera spins"), "Camera spins");
+        }
+
+        #[test]
+        fn section_heading_leaves_out_the_hashes() {
+            assert_eq!(text_source("# Act 1"), "Act 1");
+            assert_eq!(text_source("##Montage"), "Montage");
         }
 
         #[test]

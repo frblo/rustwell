@@ -83,13 +83,15 @@ pub fn line_col(src: &str, offset: usize) -> (usize, usize) {
 pub enum Element {
     Section {
         depth: u8,
-        heading: RichString,
+        /// The heading text. The range covers the text only, without the `#`s.
+        heading: Span<RichString>,
     },
     Heading {
         /// Written with a leading `.`.
         forced: bool,
-        /// The heading text, without the leading `.` and the trailing scene number.
-        text: RichString,
+        /// The heading text. The range covers the text only, without the leading `.` and the
+        /// trailing scene number.
+        text: Span<RichString>,
         /// The scene number between the `#`s. The range covers the number, not the `#`s.
         number: Option<Span<String>>,
     },
@@ -107,7 +109,8 @@ pub enum Element {
     Transition {
         /// Written with a leading `>`.
         forced: bool,
-        text: RichString,
+        /// The transition text. The range covers the text only, without the leading `>`.
+        text: Span<RichString>,
     },
     CenteredText(Lines),
     Synopsis(Lines),

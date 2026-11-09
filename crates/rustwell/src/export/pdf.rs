@@ -383,7 +383,7 @@ impl PdfExporter {
                             )?;
                         }
                         outline.push_child(OutlineNode::new(
-                            text.to_plain_string(),
+                            text.inner.to_plain_string(),
                             XyzDestination::new(
                                 page_idx,
                                 Point {
@@ -392,7 +392,7 @@ impl PdfExporter {
                                 },
                             ),
                         ));
-                        write_element!(text, &MARGINS.heading, Alignment::LeftToRight);
+                        write_element!(&text.inner, &MARGINS.heading, Alignment::LeftToRight);
                     }
                     Element::Action { lines, .. } => {
                         write_element!(&lines.join(), &MARGINS.action, Alignment::LeftToRight);
@@ -461,7 +461,7 @@ impl PdfExporter {
                         write_element!(&s.join(), &MARGINS.lyrics, Alignment::LeftToRight);
                     }
                     Element::Transition { text, .. } => {
-                        write_element!(text, &MARGINS.transition, Alignment::RightToLeft);
+                        write_element!(&text.inner, &MARGINS.transition, Alignment::RightToLeft);
                     }
                     Element::CenteredText(s) => {
                         write_element!(&s.join(), &MARGINS.centered, Alignment::Centered);

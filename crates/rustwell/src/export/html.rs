@@ -137,7 +137,7 @@ impl HtmlExporter {
                     } else {
                         String::new()
                     },
-                    self.format_rich_string(text),
+                    self.format_rich_string(&text.inner),
                     if let Some(x) = number {
                         format!(
                             r#"<span class="scnumr">{}</span>"#,
@@ -182,7 +182,9 @@ impl HtmlExporter {
                 "lyrics",
                 format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
-            Element::Transition { text, .. } => ("transition", self.format_rich_string(text)),
+            Element::Transition { text, .. } => {
+                ("transition", self.format_rich_string(&text.inner))
+            }
             Element::CenteredText(s) => (
                 "action centered",
                 format!(r"<p>{}</p>", self.format_rich_string(&s.join())),
