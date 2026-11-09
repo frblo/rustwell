@@ -211,35 +211,106 @@ pub enum DialogueElement {
     Line(RichString),
 }
 
-/// The information for a title page. Each field may be empty as none are strictly required
-/// according to the fountain specification.
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+/// The title page of the screenplay.
+///
+/// Fountain spec defines some common entries, these have functions to access
+/// them. But other `Key: value` entries are also stored.
+///
+/// A key that is repeated gives repeated entries, which [`TitlePage::values`] 
+/// reads as one block of values. This means `Title: A` followed by `Title: B`
+/// means the same as `Title:` with `A` and `B` indented below.
+///
+/// Keys are looked up by name, so any key can be read without the parser having to know it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TitlePage {
-    pub title: Vec<Span<RichString>>,
-    pub credit: Vec<Span<RichString>>,
-    pub authors: Vec<Span<RichString>>,
-    pub source: Vec<Span<RichString>>,
-    pub draft_date: Vec<Span<RichString>>,
-    pub contact: Vec<Span<RichString>>,
+    pub entries: Vec<TitleEntry>,
 }
 
-impl TitlePage {
-    /// Creates a new empty [`TitlePage`].
-    pub fn new() -> Self {
-        Self {
-            title: Vec::new(),
-            credit: Vec::new(),
-            authors: Vec::new(),
-            source: Vec::new(),
-            draft_date: Vec::new(),
-            contact: Vec::new(),
-        }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TitleEntry {
+    /// The key as written, `Draft date` rather than `draft_date`,
+    /// with the range of the key only.
+    pub key: Span<String>,
+    /// One value for `Key: value`, one per indented line for a block.
+    pub values: Vec<Span<RichString>>,
+}
+
+impl TitleEntry {
+    /// If this entry's key is `key`.
+    ///
+    /// Matching ignores ASCII case and surrounding whitespace, treats runs of 
+    /// whitespace inside the key as one space, and counts `Author` and
+    /// `Authors` as the same key.
+    pub fn is_key(&self, key: &str) -> bool {
+        normalize_key(&self.key.inner) == normalize_key(key)
     }
 }
 
-impl Default for TitlePage {
-    fn default() -> Self {
-        Self::new()
+impl TitlePage {
+    /// Whether the page has any entry the exporters display,
+    /// which are the ones defined in the Fountian spec.
+    pub fn has_displayed_entries(&self) -> bool {
+        self.title()
+            .chain(self.credit())
+            .chain(self.authors())
+            .chain(self.source())
+            .chain(self.draft_date())
+            .chain(self.contact())
+            .next()
+            .is_some()
+    }
+
+    /// The entries whose key is `key`, in source order.
+    /// See [`TitleEntry::is_key`] for matching.
+    pub fn entries(&self, key: &str) -> impl Iterator<Item = &TitleEntry> {
+        let key = normalize_key(key);
+        self.entries
+            .iter()
+            .filter(move |entry| normalize_key(&entry.key.inner) == key)
+    }
+
+    /// The values of every entry whose key is `key`, in source order.
+    pub fn values(&self, key: &str) -> impl Iterator<Item = &Span<RichString>> {
+        self.entries(key).flat_map(|entry| entry.values.iter())
+    }
+
+    pub fn title(&self) -> impl Iterator<Item = &Span<RichString>> {
+        self.values("title")
+    }
+
+    pub fn credit(&self) -> impl Iterator<Item = &Span<RichString>> {
+        self.values("credit")
+    }
+
+    /// The values of `Author` and `Authors`.
+    pub fn authors(&self) -> impl Iterator<Item = &Span<RichString>> {
+        self.values("author")
+    }
+
+    pub fn source(&self) -> impl Iterator<Item = &Span<RichString>> {
+        self.values("source")
+    }
+
+    pub fn draft_date(&self) -> impl Iterator<Item = &Span<RichString>> {
+        self.values("draft date")
+    }
+
+    pub fn contact(&self) -> impl Iterator<Item = &Span<RichString>> {
+        self.values("contact")
+    }
+}
+
+/// The form of a title page key that keys are compared in.
+fn normalize_key(key: &str) -> String {
+    let words: Vec<String> = key
+        .split_whitespace()
+        .map(|word| word.to_ascii_lowercase())
+        .collect();
+    let key = words.join(" ");
+    if key == "authors" {
+        "author".to_string()
+    } else {
+        key
     }
 }
 

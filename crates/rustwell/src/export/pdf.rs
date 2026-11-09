@@ -258,7 +258,11 @@ impl PdfExporter {
 
         let mut outline = Outline::new();
 
-        if let Some(t) = &screenplay.titlepage {
+        let titlepage = screenplay
+            .titlepage
+            .as_ref()
+            .filter(|t| t.has_displayed_entries());
+        if let Some(t) = titlepage {
             page_idx += 1;
             write_titlepage(t, layout_info, max_lines_per_page, document)?;
         }
@@ -273,14 +277,12 @@ impl PdfExporter {
             let mut line_idx = 0;
 
             // Writes the page number.
-            if (screenplay.titlepage.is_none() && page_idx > 0)
-                || (screenplay.titlepage.is_some() && page_idx > 1)
-            {
+            if (titlepage.is_none() && page_idx > 0) || (titlepage.is_some() && page_idx > 1) {
                 let residual_page_number = write_element_custom_top_margin(
                     layout_info,
                     &format!(
                         "{}.",
-                        if screenplay.titlepage.is_some() {
+                        if titlepage.is_some() {
                             page_idx
                         } else {
                             page_idx + 1
@@ -878,8 +880,9 @@ fn write_titlepage(
     macro_rules! write_title_element {
         // For the elements which are centered an written below each other.
         ($element:ident) => {
-            if !titlepage.$element.is_empty() {
-                for s in &titlepage.$element {
+            let values: Vec<&Span<RichString>> = titlepage.$element().collect();
+            if !values.is_empty() {
+                for s in &values {
                     let residual = write_element(
                         layout_info,
                         &s.inner,
@@ -903,9 +906,10 @@ fn write_titlepage(
         };
         // For elements which have specific alignments and are written from the bottom up.
         ($element:ident, $alignment:expr) => {
-            if !titlepage.$element.is_empty() {
-                let mut total_lines = titlepage.$element.len();
-                for s in &titlepage.$element {
+            let values: Vec<&Span<RichString>> = titlepage.$element().collect();
+            if !values.is_empty() {
+                let mut total_lines = values.len();
+                for s in &values {
                     total_lines += break_points(
                         &s.inner,
                         glyph_span(
@@ -925,7 +929,7 @@ fn write_titlepage(
                 }
                 line_idx = max_lines - total_lines;
 
-                for s in &titlepage.$element {
+                for s in &values {
                     write_element(
                         layout_info,
                         &s.inner,

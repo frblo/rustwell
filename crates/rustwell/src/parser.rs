@@ -12,7 +12,7 @@ use crate::screenplay::Lines;
 use crate::screenplay::Screenplay;
 use crate::screenplay::SourceRange;
 use crate::screenplay::Span;
-use crate::screenplay::TitlePage;
+use crate::screenplay::{TitleEntry, TitlePage};
 use scanner::LogicalLine;
 use scanner::Scan;
 
@@ -572,47 +572,40 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_title(&mut self) {
-        let mut tp = TitlePage::new();
+        let mut entries = Vec::new();
 
         while let Some(&logical) = self.lines.peek() {
             let range = logical.range;
-            let line = self.text(logical);
-            let Some((key, val)) = line.split_once(':') else {
+            let text = self.text(logical);
+            let line = LineView {
+                raw: &text,
+                trimmed: text.trim(),
+                range,
+                logical,
+            };
+            let Some((key, val)) = text.split_once(':') else {
                 break;
             };
             self.lines.next(); // Consume the key line
 
-            let mut values = Vec::new();
-
-            if val.trim().is_empty() {
-                values = self.take_indented_block();
+            let key = Span::new(key.trim().to_string(), line.source_range(key.trim()));
+            let values = if val.trim().is_empty() {
+                self.take_indented_block()
             } else {
-                values.push(Span::new(RichString::from(val), range));
-            }
-
-            match key.trim().to_ascii_uppercase().as_str() {
-                "TITLE" => tp.title = values,
-                "CREDIT" => tp.credit = values,
-                "AUTHOR" | "AUTHORS" => tp.authors = values,
-                "SOURCE" => tp.source = values,
-                "DRAFT DATE" => tp.draft_date = values,
-                "CONTACT" => tp.contact = values,
-                _ => (),
-            }
+                vec![Span::new(
+                    RichString::from(val.trim()),
+                    line.source_range(val.trim()),
+                )]
+            };
+            entries.push(TitleEntry { key, values });
         }
 
         if self.next_line_is_empty() {
             self.lines.next();
         }
 
-        if !tp.title.is_empty()
-            || !tp.credit.is_empty()
-            || !tp.authors.is_empty()
-            || !tp.source.is_empty()
-            || !tp.draft_date.is_empty()
-            || !tp.contact.is_empty()
-        {
-            self.title_page = Some(tp);
+        if !entries.is_empty() {
+            self.title_page = Some(TitlePage { entries });
         }
     }
 
@@ -622,7 +615,16 @@ impl<'a> Parser<'a> {
             let next = self.text(logical);
             if indent_width(&next) >= 3 {
                 self.lines.next();
-                out.push(Span::new(RichString::from(next.trim()), logical.range));
+                let line = LineView {
+                    raw: &next,
+                    trimmed: next.trim(),
+                    range: logical.range,
+                    logical,
+                };
+                out.push(Span::new(
+                    RichString::from(next.trim()),
+                    line.source_range(next.trim()),
+                ));
             } else {
                 break;
             }
@@ -690,8 +692,7 @@ mod tests {
         let screenplay = parse("Title:\n\tMy Movie\n\tThe Sequel\n\nAction.");
         let title_page = screenplay.titlepage.expect("expected a title page");
         let title: Vec<String> = title_page
-            .title
-            .iter()
+            .title()
             .map(|t| t.inner.to_plain_string())
             .collect();
         assert_eq!(title, ["My Movie", "The Sequel"]);
@@ -1571,23 +1572,41 @@ no",
         }
 
         #[test]
-        fn title_page_value_covers_its_whole_line_including_the_key() {
+        fn title_page_value_covers_the_value_only() {
             let src = "Title: My Movie\nCredit: Written by\nAuthor: A. Writer\n\nAction.";
             let title_page = parse(src).titlepage.expect("expected a title page");
-            assert_eq!(sources(src, &title_page.title), ["Title: My Movie"]);
-            assert_eq!(sources(src, &title_page.credit), ["Credit: Written by"]);
-            assert_eq!(sources(src, &title_page.authors), ["Author: A. Writer"]);
+            let values =
+                |key: &str| -> Vec<&str> { title_page.values(key).map(|v| &src[v.span]).collect() };
+            assert_eq!(values("title"), ["My Movie"]);
+            assert_eq!(values("credit"), ["Written by"]);
+            assert_eq!(values("author"), ["A. Writer"]);
             assert_eq!(element_sources(src), ["Action."]);
+        }
+
+        #[test]
+        fn title_page_keeps_every_entry_in_order_with_the_key_range() {
+            let src = "Title: A\nFoo Bar: x\nTitle: B\n\nAction.";
+            let title_page = parse(src).titlepage.expect("expected a title page");
+            let keys: Vec<&str> = title_page
+                .entries
+                .iter()
+                .map(|e| &src[e.key.span])
+                .collect();
+            assert_eq!(keys, ["Title", "Foo Bar", "Title"]);
+            let title: Vec<String> = title_page
+                .title()
+                .map(|v| v.inner.to_plain_string())
+                .collect();
+            assert_eq!(title, ["A", "B"]);
+            assert_eq!(title_page.entries("FOO  bar").count(), 1);
         }
 
         #[test]
         fn indented_title_page_values_each_cover_one_line() {
             let src = "Title:\n   My Movie\n   The Sequel\n\nAction.";
             let title_page = parse(src).titlepage.expect("expected a title page");
-            assert_eq!(
-                sources(src, &title_page.title),
-                ["   My Movie", "   The Sequel"]
-            );
+            let title: Vec<&str> = title_page.title().map(|v| &src[v.span]).collect();
+            assert_eq!(title, ["My Movie", "The Sequel"]);
             assert_eq!(element_sources(src), ["Action."]);
         }
 

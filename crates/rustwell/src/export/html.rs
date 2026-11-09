@@ -42,7 +42,11 @@ impl Exporter for HtmlExporter {
         }
 
         writeln!(writer, r#"<div class="rustwell screenplay">"#)?;
-        if let Some(titlepage) = &screenplay.titlepage {
+        if let Some(titlepage) = screenplay
+            .titlepage
+            .as_ref()
+            .filter(|t| t.has_displayed_entries())
+        {
             writeln!(writer, "{}", self.export_titlepage(titlepage))?;
         }
         for e in screenplay
@@ -88,12 +92,12 @@ impl HtmlExporter {
             {}
             {}
         </div>"#,
-            self.export_titlepage_element("title", &titlepage.title),
-            self.export_titlepage_element("credit", &titlepage.credit),
-            self.export_titlepage_element("authors", &titlepage.authors),
-            self.export_titlepage_element("source", &titlepage.source),
-            self.export_titlepage_element("draft-date", &titlepage.draft_date),
-            self.export_titlepage_element("contact", &titlepage.contact),
+            self.export_titlepage_element("title", titlepage.title()),
+            self.export_titlepage_element("credit", titlepage.credit()),
+            self.export_titlepage_element("authors", titlepage.authors()),
+            self.export_titlepage_element("source", titlepage.source()),
+            self.export_titlepage_element("draft-date", titlepage.draft_date()),
+            self.export_titlepage_element("contact", titlepage.contact()),
         )
     }
 
@@ -101,13 +105,12 @@ impl HtmlExporter {
     /// on the [`TitlePage`] to a `html` string. If there are no [`RichString`]s
     /// we do not include the value on the [`TitlePage`],
     /// and only return `""` here.
-    fn export_titlepage_element(&self, value: &str, element: &[Span<RichString>]) -> String {
-        if element.is_empty() {
-            return String::new();
-        }
-
+    fn export_titlepage_element<'a>(
+        &self,
+        value: &str,
+        element: impl Iterator<Item = &'a Span<RichString>>,
+    ) -> String {
         let content = element
-            .iter()
             .map(|s| {
                 format!(
                     "<p {}>{}</p>",
@@ -117,6 +120,10 @@ impl HtmlExporter {
             })
             .collect::<Vec<String>>()
             .concat();
+
+        if content.is_empty() {
+            return String::new();
+        }
 
         format!(r#"<div class="{value}">{content}</div>"#)
     }
