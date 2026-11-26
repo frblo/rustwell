@@ -19,6 +19,7 @@
 //! assert!(rs.elements[2].is_bold());
 //! ```
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::{fmt::Display, str::Chars};
 
@@ -39,6 +40,8 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 /// Emphasis is parsed in accordance to the `CommonMark` specification.
 /// Furthermore, these can be combined in any overlapping order. Use `\` for a styling character to be
 /// ignored for style parsing.
+///
+/// A [`RichString`] will always have tabs normalized to four spaces as specified in the `Fountain` specification.
 ///
 /// # Examples
 ///
@@ -137,7 +140,7 @@ impl RichString {
         RichIterator {
             rich_string: self,
             element_idx: 0,
-            chars_iterator: self.elements[0].text.chars(),
+            chars_iterator: self.elements.first().map_or("".chars(), |e| e.text.chars()),
         }
     }
 
@@ -160,10 +163,27 @@ impl RichString {
     /// Pushes a string onto the [`RichString`]. Will divide the string into
     /// multiple elements with different styles if input string can be parsed with styles.
     pub fn push_str(&mut self, str: impl AsRef<str>) {
-        let str = str.as_ref();
-        let (tokens, mut delimiters) = Self::tokenize(str);
+        let str = expand_tabs(str.as_ref());
+        let (tokens, mut delimiters) = Self::tokenize(&str);
         let matches = Self::match_delimiters(&mut delimiters);
         self.push_parsed(&tokens, &delimiters, &matches);
+    }
+
+    /// Joins `parts` into one [`RichString`], with `separator` between them.
+    ///
+    /// The parts keep the styles they were parsed with, so styling never runs across a separator.
+    pub(crate) fn join<'a>(
+        parts: impl IntoIterator<Item = &'a RichString>,
+        separator: &str,
+    ) -> RichString {
+        let mut joined = RichString::new();
+        for (i, part) in parts.into_iter().enumerate() {
+            if i > 0 {
+                joined.push_str(separator);
+            }
+            joined.append(part.clone());
+        }
+        joined
     }
 
     /// Converts the [`RichString`] to a plain [`String`] by just combining the string elements
@@ -560,9 +580,36 @@ struct Match {
     attrs: Attributes,
 }
 
+/// Expands each tab to four spaces, borrowing when there are none.
+fn expand_tabs(text: &str) -> Cow<'_, str> {
+    if text.contains('\t') {
+        Cow::Owned(text.replace('\t', "    "))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabs_expand_to_four_spaces() {
+        assert_eq!(RichString::from("a\tb").to_plain_string(), "a    b");
+        assert_eq!(RichString::from("\tc").to_plain_string(), "    c");
+    }
+
+    #[test]
+    fn tabs_expand_inside_styled_text() {
+        let rs: RichString = "*a\tb*".into();
+        assert_eq!(rs.to_plain_string(), "a    b");
+        assert!(rs.elements[0].is_italic());
+    }
+
+    #[test]
+    fn expand_tabs_borrows_when_there_are_none() {
+        assert!(matches!(expand_tabs("abc"), Cow::Borrowed(_)));
+    }
 
     #[test]
     fn appends_same_attributes() {
@@ -570,6 +617,17 @@ mod tests {
         let other: RichString = "*c*d".into();
         rs.append(other);
         assert_eq!(rs.elements[1].text, "bc".to_string())
+    }
+
+    #[test]
+    fn iterating_an_empty_rich_string_yields_nothing() {
+        assert_eq!(RichString::new().iter().next(), None);
+    }
+
+    #[test]
+    fn joins_with_a_separator() {
+        let parts: [RichString; 3] = ["a".into(), "".into(), "*b*".into()];
+        assert_eq!(RichString::join(&parts, "\n"), "a\n\n*b*".into());
     }
 
     #[test]

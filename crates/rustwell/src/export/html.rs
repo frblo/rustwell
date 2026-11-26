@@ -3,7 +3,7 @@ use std::io::Write;
 use crate::{
     export::Exporter,
     rich_string::{self, RichString},
-    screenplay::{Dialogue, DialogueElement, Element, Screenplay, Span, TitlePage},
+    screenplay::{Dialogue, DialogueElement, Element, Screenplay, SourceRange, Span, TitlePage},
 };
 
 /// Contents of the `style.css` file with all css rules for the `html` output.
@@ -22,7 +22,8 @@ pub struct HtmlExporter {
     pub standalone: bool,
     /// If synopses should be included in the output
     pub synopses: bool,
-    /// Decides if the `html` should include the line span for each element
+    /// Decides if the `html` should include the source byte offsets (`data-start` and
+    /// `data-end`) for each element
     pub include_source_positions: bool,
 }
 
@@ -41,10 +42,18 @@ impl Exporter for HtmlExporter {
         }
 
         writeln!(writer, r#"<div class="rustwell screenplay">"#)?;
-        if let Some(titlepage) = &screenplay.titlepage {
+        if let Some(titlepage) = screenplay
+            .titlepage
+            .as_ref()
+            .filter(|t| t.has_displayed_entries())
+        {
             writeln!(writer, "{}", self.export_titlepage(titlepage))?;
         }
-        for e in &screenplay.elements {
+        for e in screenplay
+            .elements
+            .iter()
+            .filter(|e| !matches!(e.inner, Element::Section { .. }))
+        {
             writeln!(writer, "{}", self.export_element(e))?;
         }
         writeln!(writer, "</div>")?;
@@ -83,12 +92,12 @@ impl HtmlExporter {
             {}
             {}
         </div>"#,
-            self.export_titlepage_element("title", &titlepage.title),
-            self.export_titlepage_element("credit", &titlepage.credit),
-            self.export_titlepage_element("authors", &titlepage.authors),
-            self.export_titlepage_element("source", &titlepage.source),
-            self.export_titlepage_element("draft-date", &titlepage.draft_date),
-            self.export_titlepage_element("contact", &titlepage.contact),
+            self.export_titlepage_element("title", titlepage.title()),
+            self.export_titlepage_element("credit", titlepage.credit()),
+            self.export_titlepage_element("authors", titlepage.authors()),
+            self.export_titlepage_element("source", titlepage.source()),
+            self.export_titlepage_element("draft-date", titlepage.draft_date()),
+            self.export_titlepage_element("contact", titlepage.contact()),
         )
     }
 
@@ -96,22 +105,25 @@ impl HtmlExporter {
     /// on the [`TitlePage`] to a `html` string. If there are no [`RichString`]s
     /// we do not include the value on the [`TitlePage`],
     /// and only return `""` here.
-    fn export_titlepage_element(&self, value: &str, element: &[Span<RichString>]) -> String {
-        if element.is_empty() {
-            return String::new();
-        }
-
+    fn export_titlepage_element<'a>(
+        &self,
+        value: &str,
+        element: impl Iterator<Item = &'a Span<RichString>>,
+    ) -> String {
         let content = element
-            .iter()
             .map(|s| {
                 format!(
                     "<p {}>{}</p>",
-                    self.source_position_attrs(s.start_line, s.end_line),
-                    self.format_rich_string(s)
+                    self.source_position_attrs(s.span),
+                    self.format_rich_string(&s.inner)
                 )
             })
             .collect::<Vec<String>>()
             .concat();
+
+        if content.is_empty() {
+            return String::new();
+        }
 
         format!(r#"<div class="{value}">{content}</div>"#)
     }
@@ -123,27 +135,30 @@ impl HtmlExporter {
         }
 
         let (class, content) = match &element.inner {
-            Element::Heading { slug, number } => (
+            Element::Heading { text, number, .. } => (
                 "scene-heading",
                 format!(
                     "{}{}{}",
                     if let Some(x) = number {
-                        format!(r#"<span class="scnuml">{x}</span>"#)
+                        format!(r#"<span class="scnuml">{}</span>"#, x.inner)
                     } else {
                         String::new()
                     },
-                    self.format_rich_string(slug),
+                    self.format_rich_string(&text.inner),
                     if let Some(x) = number {
                         format!(
                             r#"<span class="scnumr">{}</span>"#,
-                            Self::encode_special_html_characters(&x)
+                            Self::encode_special_html_characters(&x.inner)
                         )
                     } else {
                         String::new()
                     },
                 ),
             ),
-            Element::Action(s) => ("action", format!("<p>{}</p>", self.format_rich_string(s))),
+            Element::Action { lines, .. } => (
+                "action",
+                format!("<p>{}</p>", self.format_rich_string(&lines.join())),
+            ),
             Element::Dialogue(dialogue) => (
                 "dialogue",
                 format!(
@@ -152,7 +167,7 @@ impl HtmlExporter {
                     self.format_dialogue(&dialogue.elements),
                 ),
             ),
-            Element::DualDialogue(dialogue1, dialogue2) => (
+            Element::DualDialogue { primary, dual } => (
                 "dual",
                 format!(
                     r#"
@@ -164,46 +179,46 @@ impl HtmlExporter {
                     <p class="character">{}</p>
                     {}
                 </div>"#,
-                    self.format_character(dialogue1),
-                    self.format_dialogue(&dialogue1.elements),
-                    self.format_character(dialogue2),
-                    self.format_dialogue(&dialogue2.elements),
+                    self.format_character(&primary.inner),
+                    self.format_dialogue(&primary.inner.elements),
+                    self.format_character(&dual.inner),
+                    self.format_dialogue(&dual.inner.elements),
                 ),
             ),
             Element::Lyrics(s) => (
                 "lyrics",
-                format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
+                format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
-            Element::Transition(s) => ("transition", self.format_rich_string(s)),
+            Element::Transition { text, .. } => {
+                ("transition", self.format_rich_string(&text.inner))
+            }
             Element::CenteredText(s) => (
                 "action centered",
-                format!(r"<p>{}</p>", self.format_rich_string(s)),
+                format!(r"<p>{}</p>", self.format_rich_string(&s.join())),
             ),
             Element::Synopsis(s) => (
                 "synopsis",
-                format!(r#"<p>{}</p>"#, self.format_rich_string(s)),
+                format!(r#"<p>{}</p>"#, self.format_rich_string(&s.join())),
             ),
+            Element::Section { .. } => unreachable!("sections are skipped above"),
             Element::PageBreak => ("", String::new()), // No pagebreaks in html
         };
 
         format!(
             r#"<div class="{}" {}>{}</div>"#,
             class,
-            self.source_position_attrs(element.start_line, element.end_line),
+            self.source_position_attrs(element.span),
             content
         )
     }
 
     fn format_character(&self, dialogue: &Dialogue) -> String {
-        if let Some(extension) = &dialogue.extension {
-            format!(
-                "{} ({})",
-                self.format_rich_string(&dialogue.character),
-                self.format_rich_string(extension)
-            )
-        } else {
-            self.format_rich_string(&dialogue.character)
+        let character = &dialogue.character.inner;
+        let mut formatted = self.format_rich_string(&character.name.inner);
+        if let Some(extension) = character.extensions.first() {
+            formatted.push_str(&format!(" ({})", self.format_rich_string(&extension.inner)));
         }
+        formatted
     }
 
     /// Formats a [`RichString`] into a `html`-[String].
@@ -236,28 +251,45 @@ impl HtmlExporter {
         )
     }
 
-    /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String], combining the
-    /// [`DialogueElement`]s.
+    /// Formats the [Vec<DialogueElement>] of the dialogue into a `html`-[String]. Consecutive
+    /// [`DialogueElement::Line`]s are one paragraph, with a line break between the lines.
     fn format_dialogue(&self, dialogue: &[Span<DialogueElement>]) -> String {
-        dialogue
-            .iter()
-            .map(|d| self.format_dialogue_element(d))
-            .collect::<Vec<String>>()
-            .join("\n")
-    }
-
-    /// Formats a [`DialogueElement`] into a `html`-[String].
-    fn format_dialogue_element(&self, element: &Span<DialogueElement>) -> String {
-        let attrs = self.source_position_attrs(element.start_line, element.end_line);
-        match &element.inner {
-            DialogueElement::Parenthetical(s) => {
-                format!(
-                    r#"<p class="parenthetical" {attrs}>{}</p>"#,
-                    self.format_rich_string(s)
-                )
+        let mut paragraphs = Vec::new();
+        let mut rest = dialogue;
+        while let Some((first, tail)) = rest.split_first() {
+            match &first.inner {
+                DialogueElement::Parenthetical(s) => {
+                    let attrs = self.source_position_attrs(first.span);
+                    paragraphs.push(format!(
+                        r#"<p class="parenthetical" {attrs}>{}</p>"#,
+                        self.format_rich_string(s)
+                    ));
+                    rest = tail;
+                }
+                DialogueElement::Line(_) => {
+                    let run_len = rest
+                        .iter()
+                        .take_while(|e| matches!(e.inner, DialogueElement::Line(_)))
+                        .count();
+                    let (run, tail) = rest.split_at(run_len);
+                    let text = RichString::join(
+                        run.iter().filter_map(|e| match &e.inner {
+                            DialogueElement::Line(s) => Some(s),
+                            DialogueElement::Parenthetical(_) => None,
+                        }),
+                        "\n",
+                    );
+                    let span = SourceRange::from(first.span.start..run[run_len - 1].span.end);
+                    let attrs = self.source_position_attrs(span);
+                    paragraphs.push(format!(
+                        r"<p {attrs}>{}</p>",
+                        self.format_rich_string(&text)
+                    ));
+                    rest = tail;
+                }
             }
-            DialogueElement::Line(s) => format!(r"<p {attrs}>{}</p>", self.format_rich_string(s)),
         }
+        paragraphs.join("\n")
     }
 
     /// Encodes potentially dangerous patterns in `html`
@@ -267,11 +299,11 @@ impl HtmlExporter {
             .replace('>', "&gt;")
     }
 
-    /// Renders the `data-start-line`/`data-end-line` attributes for a span, or an empty string
-    /// if [`Self::include_source_positions`] is disabled.
-    fn source_position_attrs(&self, start_line: usize, end_line: usize) -> String {
+    /// Renders the `data-start`/`data-end` attributes, the byte offsets of a span in the
+    /// source, or an empty string if [`Self::include_source_positions`] is disabled.
+    fn source_position_attrs(&self, span: SourceRange) -> String {
         if self.include_source_positions {
-            format!(r#"data-start-line="{start_line}" data-end-line="{end_line}""#)
+            format!(r#"data-start="{}" data-end="{}""#, span.start, span.end)
         } else {
             String::new()
         }

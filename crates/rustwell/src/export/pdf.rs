@@ -234,7 +234,12 @@ impl PdfExporter {
         layout_info: &LayoutInfo,
         screenplay: &Screenplay,
     ) -> std::io::Result<()> {
-        let mut element_iter = screenplay.elements.iter().peekable();
+        // Sections only structure the source, they are not laid out.
+        let mut element_iter = screenplay
+            .elements
+            .iter()
+            .filter(|e| !matches!(e.inner, Element::Section { .. }))
+            .peekable();
 
         // The index for which page in the document is currently being written.
         let mut page_idx = 0;
@@ -253,7 +258,11 @@ impl PdfExporter {
 
         let mut outline = Outline::new();
 
-        if let Some(t) = &screenplay.titlepage {
+        let titlepage = screenplay
+            .titlepage
+            .as_ref()
+            .filter(|t| t.has_displayed_entries());
+        if let Some(t) = titlepage {
             page_idx += 1;
             write_titlepage(t, layout_info, max_lines_per_page, document)?;
         }
@@ -268,14 +277,12 @@ impl PdfExporter {
             let mut line_idx = 0;
 
             // Writes the page number.
-            if (screenplay.titlepage.is_none() && page_idx > 0)
-                || (screenplay.titlepage.is_some() && page_idx > 1)
-            {
+            if (titlepage.is_none() && page_idx > 0) || (titlepage.is_some() && page_idx > 1) {
                 let residual_page_number = write_element_custom_top_margin(
                     layout_info,
                     &format!(
                         "{}.",
-                        if screenplay.titlepage.is_some() {
+                        if titlepage.is_some() {
                             page_idx
                         } else {
                             page_idx + 1
@@ -302,8 +309,7 @@ impl PdfExporter {
 
             // Element loop, iterates through the screenplay elements.
             while let Some(Span {
-                start_line: _,
-                end_line: _,
+                span: _,
                 inner: element,
             }) = element_iter.peek()
             {
@@ -341,7 +347,7 @@ impl PdfExporter {
                 }
 
                 match &element {
-                    Element::Heading { slug, number } => {
+                    Element::Heading { text, number, .. } => {
                         if number.is_some() {
                             let initial_line_index = line_idx;
 
@@ -354,7 +360,7 @@ impl PdfExporter {
                                 right: 18.0,
                             };
 
-                            let rich_number = &number.as_ref().unwrap().into();
+                            let rich_number = &number.as_ref().unwrap().inner.as_str().into();
 
                             write_element(
                                 layout_info,
@@ -379,7 +385,7 @@ impl PdfExporter {
                             )?;
                         }
                         outline.push_child(OutlineNode::new(
-                            slug.to_plain_string(),
+                            text.inner.to_plain_string(),
                             XyzDestination::new(
                                 page_idx,
                                 Point {
@@ -388,10 +394,10 @@ impl PdfExporter {
                                 },
                             ),
                         ));
-                        write_element!(slug, &MARGINS.heading, Alignment::LeftToRight);
+                        write_element!(&text.inner, &MARGINS.heading, Alignment::LeftToRight);
                     }
-                    Element::Action(s) => {
-                        write_element!(s, &MARGINS.action, Alignment::LeftToRight);
+                    Element::Action { lines, .. } => {
+                        write_element!(&lines.join(), &MARGINS.action, Alignment::LeftToRight);
                     }
                     Element::Dialogue(dialogue) => {
                         let premature_exit = write_dialogue(
@@ -408,7 +414,7 @@ impl PdfExporter {
                             break;
                         }
                     }
-                    Element::DualDialogue(dialogue0, dialogue1) => {
+                    Element::DualDialogue { primary, dual } => {
                         let mut initial_line_index = line_idx;
                         let mut premature_exit = false;
                         // Ensures dual dialogue is only written it either both have not been
@@ -420,7 +426,7 @@ impl PdfExporter {
                             premature_exit = premature_exit
                                 || write_dialogue(
                                     layout_info,
-                                    dialogue0,
+                                    &primary.inner,
                                     &mut residual_dual_dialogue_idx.0,
                                     &mut residual_dual_breakpoint_idx.0,
                                     max_lines_per_page,
@@ -436,7 +442,7 @@ impl PdfExporter {
                             premature_exit = premature_exit
                                 || write_dialogue(
                                     layout_info,
-                                    dialogue1,
+                                    &dual.inner,
                                     &mut residual_dual_dialogue_idx.1,
                                     &mut residual_dual_breakpoint_idx.1,
                                     max_lines_per_page,
@@ -454,13 +460,13 @@ impl PdfExporter {
                         }
                     }
                     Element::Lyrics(s) => {
-                        write_element!(s, &MARGINS.lyrics, Alignment::LeftToRight);
+                        write_element!(&s.join(), &MARGINS.lyrics, Alignment::LeftToRight);
                     }
-                    Element::Transition(s) => {
-                        write_element!(s, &MARGINS.transition, Alignment::RightToLeft);
+                    Element::Transition { text, .. } => {
+                        write_element!(&text.inner, &MARGINS.transition, Alignment::RightToLeft);
                     }
                     Element::CenteredText(s) => {
-                        write_element!(s, &MARGINS.centered, Alignment::Centered);
+                        write_element!(&s.join(), &MARGINS.centered, Alignment::Centered);
                     }
                     Element::Synopsis(s) => {
                         if self.synopses {
@@ -469,10 +475,11 @@ impl PdfExporter {
                                 opacity: NormalizedF32::new(0.5).unwrap(),
                                 rule: Default::default(),
                             }));
-                            write_element!(s, &MARGINS.synopsis, Alignment::LeftToRight);
+                            write_element!(&s.join(), &MARGINS.synopsis, Alignment::LeftToRight);
                             surface.set_fill(None);
                         }
                     }
+                    Element::Section { .. } => unreachable!("sections are filtered out above"),
                     Element::PageBreak => {
                         element_iter.next();
                         break;
@@ -512,18 +519,15 @@ fn write_dialogue(
     surface: &mut Surface,
     dialogue_margins: &DialogueMargins,
 ) -> std::io::Result<bool> {
-    let mut character_name = dialogue.character.clone();
-    match (*residual_dialogue, &dialogue.extension) {
-        (Some(_), _) => {
-            character_name.append(" (CONT'D)".into());
-        }
-        (None, Some(ext)) => {
-            character_name.append(" (".into());
-            character_name.append(ext.clone());
-            character_name.append(")".into());
-        }
-        _ => (),
-    };
+    let character = &dialogue.character.inner;
+    let mut character_name = character.name.inner.clone();
+    if residual_dialogue.is_some() {
+        character_name.append(" (CONT'D)".into());
+    } else if let Some(extension) = character.extensions.first() {
+        character_name.append(" (".into());
+        character_name.append(extension.inner.clone());
+        character_name.append(")".into());
+    }
     let span = glyph_span(
         layout_info.size,
         dialogue_margins.character.left,
@@ -580,7 +584,7 @@ fn write_dialogue(
             None => 0,
         };
 
-        let (content, margin) = match &*dialogue.elements[dialogue_index] {
+        let (content, margin) = match &dialogue.elements[dialogue_index].inner {
             DialogueElement::Parenthetical(s) => (s, &dialogue_margins.parenthetical),
             DialogueElement::Line(s) => (s, &dialogue_margins.line),
         };
@@ -665,17 +669,20 @@ fn write_element_custom_top_margin(
                 None => bp.index,
             }
         };
-        write_line(
-            layout_info,
-            surface,
-            left_margin,
-            (FONT_SIZE * *line_index + top_margin) as f32,
-            content,
-            start_index,
-            breakpoints.get(*breakpoint_index),
-            text_direction,
-            margin,
-        )?;
+        // An empty string (a blank line) has nothing to draw, but still takes up a line.
+        if content.char_count() > 0 {
+            write_line(
+                layout_info,
+                surface,
+                left_margin,
+                (FONT_SIZE * *line_index + top_margin) as f32,
+                content,
+                start_index,
+                breakpoints.get(*breakpoint_index),
+                text_direction,
+                margin,
+            )?;
+        }
         *breakpoint_index += 1;
         *line_index += 1;
     }
@@ -873,11 +880,12 @@ fn write_titlepage(
     macro_rules! write_title_element {
         // For the elements which are centered an written below each other.
         ($element:ident) => {
-            if !titlepage.$element.is_empty() {
-                for s in &titlepage.$element {
+            let values: Vec<&Span<RichString>> = titlepage.$element().collect();
+            if !values.is_empty() {
+                for s in &values {
                     let residual = write_element(
                         layout_info,
-                        s,
+                        &s.inner,
                         &TITLE_PAGE_MARGINS.$element,
                         &mut 0,
                         &mut line_idx,
@@ -898,11 +906,12 @@ fn write_titlepage(
         };
         // For elements which have specific alignments and are written from the bottom up.
         ($element:ident, $alignment:expr) => {
-            if !titlepage.$element.is_empty() {
-                let mut total_lines = titlepage.$element.len();
-                for s in &titlepage.$element {
+            let values: Vec<&Span<RichString>> = titlepage.$element().collect();
+            if !values.is_empty() {
+                let mut total_lines = values.len();
+                for s in &values {
                     total_lines += break_points(
-                        s,
+                        &s.inner,
                         glyph_span(
                             layout_info.size,
                             TITLE_PAGE_MARGINS.$element.left,
@@ -920,10 +929,10 @@ fn write_titlepage(
                 }
                 line_idx = max_lines - total_lines;
 
-                for s in &titlepage.$element {
+                for s in &values {
                     write_element(
                         layout_info,
-                        s,
+                        &s.inner,
                         &TITLE_PAGE_MARGINS.$element,
                         &mut 0,
                         &mut line_idx,
